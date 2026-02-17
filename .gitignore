@@ -1,7 +1,33 @@
-__pycache__/
-.chatbot_env/
+# ── Ignore patterns ──────────────────────────────────────────────────
+
+# Environment & secrets
 .env
+TODO.md
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Go
+services/go-backend/server
+services/go-backend/tmp/
+
+# Data (created at runtime)
 chroma_db/
-*.zip
+
+# IDE
 .vscode/
-.python-version
+.idea/
+*.swp
+*.swo
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
