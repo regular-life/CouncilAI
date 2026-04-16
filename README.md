@@ -18,7 +18,8 @@ graph TB
         Router["Chi Router"]
         Auth["JWT Auth"]
         RL["Rate Limiter"]
-        Cache["Redis Cache"]
+        SemCache["L1 Semantic Cache<br/>(C++ SIMD Vector)"]
+        Cache["L2 Redis Cache"]
         Council["LLM Council<br/>(3-stage)"]
         Metrics["Prometheus<br/>/metrics"]
         Audit["Audit Logger"]
@@ -48,7 +49,9 @@ graph TB
 
     Client --> Router
     Router --> Auth --> RL
-    RL --> Cache
+    RL --> Handlers
+    Handlers -->|Vector Search| SemCache
+    SemCache -->|miss| Cache
     Cache -->|miss| Council
     Council -->|retrieve chunks| Python
     Council -->|fan-out| M1 & M2 & M3
@@ -75,30 +78,40 @@ sequenceDiagram
 
     C->>G: POST /api/v1/query (JWT)
     G->>G: Validate JWT + Rate Limit
-    G->>R: Check cache
-
-    alt Cache Hit
-        R-->>G: Cached response
+    
+    G->>P: POST /embed (question)
+    P-->>G: 384-dim Query Vector
+    
+    G->>G: Check L1 C++ Cache (SIMD Cosine Sim)
+    
+    alt L1 Hit
         G-->>C: 200 OK (cache_hit: true)
-    else Cache Miss
-        G->>P: POST /retrieve (question, doc_id)
-        P->>P: Embed → ChromaDB search
-        P-->>G: Top-K document chunks
+    else L1 Miss
+        G->>R: Check L2 Redis Cache (Exact Hash)
+        alt L2 Hit
+            R-->>G: Cached response
+            G-->>C: 200 OK (cache_hit: true)
+        else L2 Double Miss
+            G->>P: POST /retrieve (question, doc_id)
+            P->>P: Embed → ChromaDB search
+            P-->>G: Top-K document chunks
 
-        Note over G,L: Stage 1 — Individual Responses
-        G->>L: Fan-out to 3 LLMs (parallel)
-        L-->>G: 3 independent answers
+            Note over G,L: Stage 1 — Individual Responses
+            G->>L: Fan-out to 3 LLMs (parallel)
+            L-->>G: 3 independent answers
 
-        Note over G,L: Stage 2 — Peer Review
-        G->>L: Each model ranks others' answers
-        L-->>G: Rankings + reasoning
+            Note over G,L: Stage 2 — Peer Review
+            G->>L: Each model ranks others' answers
+            L-->>G: Rankings + reasoning
 
-        Note over G,L: Stage 3 — Chairman Synthesis
-        G->>L: Chairman sees all answers + reviews
-        L-->>G: Final synthesized answer
+            Note over G,L: Stage 3 — Chairman Synthesis
+            G->>L: Chairman sees all answers + reviews
+            L-->>G: Final synthesized answer
 
-        G->>R: Cache result
-        G-->>C: 200 OK (answer, confidence, source)
+            G->>G: Store in L1 Semantic Cache
+            G->>R: Store in L2 Redis Cache
+            G-->>C: 200 OK (answer, confidence, source)
+        end
     end
 ```
 
@@ -115,8 +128,8 @@ sequenceDiagram
 ### 1. Clone and Configure
 
 ```bash
-git clone https://github.com/regular-life/PadhAI-Dost
-cd PadhAI-Dost
+git clone https://github.com/regular-life/CouncilAI
+cd CouncilAI
 cp .env.example .env
 ```
 
@@ -173,7 +186,7 @@ curl http://localhost:8080/api/v1/query \
 ## Project Structure
 
 ```
-PadhAI-Dost/
+CouncilAI/
 ├── docker-compose.yml
 ├── .env.example
 │
@@ -264,23 +277,23 @@ The Go backend exposes Prometheus metrics at `http://localhost:8080/metrics`. Ke
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `padhai_dost_request_count_total` | Counter | Total HTTP requests (by method, path, status) |
-| `padhai_dost_request_latency_seconds` | Histogram | Request latency distribution |
-| `padhai_dost_council_response_seconds` | Histogram | End-to-end council latency |
-| `padhai_dost_chairman_synthesis_count_total` | Counter | How often the chairman model is called |
-| `padhai_dost_llm_failure_count_total` | Counter | LLM call failures |
-| `padhai_dost_cache_operations_total` | Counter | Cache hits vs misses |
+| `councilai_request_count_total` | Counter | Total HTTP requests (by method, path, status) |
+| `councilai_request_latency_seconds` | Histogram | Request latency distribution |
+| `councilai_council_response_seconds` | Histogram | End-to-end council latency |
+| `councilai_chairman_synthesis_count_total` | Counter | How often the chairman model is called |
+| `councilai_llm_failure_count_total` | Counter | LLM call failures |
+| `councilai_cache_operations_total` | Counter | Cache hits vs misses |
 
 You can scrape this endpoint with any Prometheus-compatible tool (Grafana, Prometheus server, etc.) or just curl it:
 ```bash
-curl -s http://localhost:8080/metrics | grep padhai_dost
+curl -s http://localhost:8080/metrics | grep councilai
 ```
 
 ### Grafana Dashboard
 
 A pre-built dashboard is auto-provisioned at startup. Open `http://localhost:3000` and log in with `admin` / `admin`.
 
-The **PadhAI-Dost** dashboard includes:
+The **CouncilAI** dashboard includes:
 - **Request Rate** — HTTP requests per second by method/path/status
 - **Request Latency** — p50, p95, p99 latency percentiles
 - **Council Response Time** — end-to-end council orchestration latency
@@ -321,15 +334,24 @@ All configuration is via environment variables (see [`.env.example`](.env.exampl
 
 ---
 
-## Load Testing
+## Benchmarking
 
-A self-contained load test script is included:
+Two test suites are provided to measure system performance:
 
+### 1. Load Test (Cache Hits)
 ```bash
-python tests/load_test.py
+python tests/stress_concurrency.py
 ```
+Tests concurrent throughput for exact-match Redis caching.
 
-It logs in, ingests a document, seeds 3 queries (one-time LLM calls to populate cache), then hammers the cached paths with concurrent workers. All subsequent requests are cache hits — no API rate limits burned. Prints per-query and aggregate latency stats (avg, p50, p95, p99, throughput).
+### 2. Semantic Cache Benchmark (Rephrasing Hits)
+```bash
+python tests/bench_semantic_accuracy.py
+```
+Tests the L1 C++ SIMD cache. It feeds 5 canonical queries (LLM Cold Path) and then fires 36 semantic rephrasings (e.g. "What is mode collapse?" vs "Explain how modes fail in GANs"). 
+- **Verifies**: Cosine similarity matching (0.85 margin).
+- **Quota Smart**: Strictly honors per-call cooldowns (5-12s) to protect external API keys.
+- **Results**: Detailed hop timings (/embed vs total) saved to `tests/benchmark_results.json`.
 
 ---
 

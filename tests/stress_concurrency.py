@@ -1,18 +1,4 @@
 #!/usr/bin/env python3
-"""
-PadhAI-Dost Load Test
-
-Self-contained load test that:
-  1. Logs in (creates account if needed)
-  2. Ingests a PDF document
-  3. Seeds 3 queries (first call hits LLMs, populates cache)
-  4. Hammers the cached paths concurrently
-  5. Prints latency stats to stdout
-
-Usage:
-  python tests/load_test.py
-"""
-
 import requests
 import time
 import statistics
@@ -64,9 +50,7 @@ def timed_request(method, url, **kwargs):
 
 
 def print_header(title):
-    print(f"\n{'─' * 60}")
-    print(f"  {title}")
-    print(f"{'─' * 60}")
+    print(f"\n[{title}]")
 
 
 def print_stats(label, latencies, errors):
@@ -229,9 +213,7 @@ def step_load_test(headers, payloads):
 # ── Main ──────────────────────────────────────────────────────────────
 
 def main():
-    print("╔══════════════════════════════════════════════════════════╗")
-    print("║          PadhAI-Dost Load Test                           ║")
-    print("╚══════════════════════════════════════════════════════════╝")
+    print("--- CouncilAI Concurrency Stress Test ---")
 
     headers = step_login()
     doc_id = step_ingest(headers)

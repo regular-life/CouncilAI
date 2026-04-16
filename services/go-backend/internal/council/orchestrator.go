@@ -1,17 +1,16 @@
-// Package council implements multi-LLM orchestration following Karpathy's
-// council pattern: fan-out → peer review → chairman synthesis.
 package council
 
 import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/regular-life/padhai-dost/go-backend/internal/llm"
-	"github.com/regular-life/padhai-dost/go-backend/internal/metrics"
+	"github.com/regular-life/CouncilAI/go-backend/internal/llm"
+	"github.com/regular-life/CouncilAI/go-backend/internal/metrics"
 )
 
 type CouncilResult struct {
@@ -53,12 +52,18 @@ func NewOrchestrator(clients []llm.LLMClient, chairmanClient llm.LLMClient, stag
 	}
 }
 
-// Query runs the full council orchestration. If customPrompt is non-empty, it's
-// used as the fan-out prompt; otherwise a default Q&A prompt is built. When
-// skipChairman is true, the chairman synthesis is skipped and the best
-// peer-reviewed candidate is returned directly (useful for structured JSON outputs).
 func (o *Orchestrator) Query(ctx context.Context, question string, chunks []string, customPrompt string, skipChairman bool) (*CouncilResult, error) {
 	start := time.Now()
+
+	if os.Getenv("MOCK_LLM") == "true" {
+		time.Sleep(300 * time.Millisecond) // Simulate a very fast LLM
+		return &CouncilResult{
+			FinalAnswer: "MOCK RESPONSE: Answer generated locally to preserve API quotas. Original Question: " + question,
+			Confidence:  0.99,
+			Source:      "mock:council",
+			Latency:     time.Since(start),
+		}, nil
+	}
 
 	prompt := customPrompt
 	if prompt == "" {
@@ -76,8 +81,7 @@ func (o *Orchestrator) Query(ctx context.Context, question string, chunks []stri
 		- Be concise but thorough`, contextText, question)
 	}
 
-	// Stage 1: fan-out to all models
-	log.Printf("[Council] Stage 1: Collecting individual responses from %d models", len(o.clients))
+	log.Printf("[Council] Collecting individual responses from %d models", len(o.clients))
 	candidates := o.fanOut(prompt)
 
 	var valid []CandidateAnswer
@@ -100,8 +104,7 @@ func (o *Orchestrator) Query(ctx context.Context, question string, chunks []stri
 		}, nil
 	}
 
-	// Stage 2: peer review
-	log.Printf("[Council] Stage 2: Peer review with %d valid candidates", len(valid))
+	log.Printf("[Council] Peer review with %d valid candidates", len(valid))
 	reviews := o.peerReview(question, valid)
 
 	successfulReviews := 0
@@ -137,8 +140,7 @@ func (o *Orchestrator) Query(ctx context.Context, question string, chunks []stri
 		}, nil
 	}
 
-	// Stage 3: chairman synthesis
-	log.Printf("[Council] Stage 3: Chairman synthesis")
+	log.Printf("[Council] Chairman synthesis")
 	chairmanResult, err := o.chairmanSynthesize(question, chunks, valid, reviews)
 	if err != nil {
 		log.Printf("[Council] Chairman synthesis failed: %v, falling back to best candidate", err)
@@ -179,7 +181,7 @@ func (o *Orchestrator) fanOut(prompt string) []CandidateAnswer {
 
 			resp, err := c.Generate(ctx, prompt)
 			if err != nil {
-				log.Printf("[Council] Stage 1: Model %s failed: %v", c.ModelName(), err)
+				log.Printf("[Council] Model %s failed: %v", c.ModelName(), err)
 				metrics.LLMFailureCount.Inc()
 				results[idx] = CandidateAnswer{Model: c.ModelName(), Error: err.Error()}
 				return
@@ -229,7 +231,7 @@ REASONING: [1-2 sentence explanation of your ranking]`, question, answersBlock)
 
 			resp, err := c.Generate(ctx, prompt)
 			if err != nil {
-				log.Printf("[Council] Stage 2: Reviewer %s failed: %v", c.ModelName(), err)
+				log.Printf("[Council] Reviewer %s failed: %v", c.ModelName(), err)
 				reviews[idx] = PeerReview{Reviewer: c.ModelName(), Error: err.Error()}
 				return
 			}

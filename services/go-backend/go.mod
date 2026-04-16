@@ -1,4 +1,4 @@
-module github.com/regular-life/padhai-dost/go-backend
+module github.com/regular-life/CouncilAI/go-backend
 
 go 1.22
 

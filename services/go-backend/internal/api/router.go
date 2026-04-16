@@ -6,10 +6,10 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/regular-life/padhai-dost/go-backend/internal/api/handlers"
-	"github.com/regular-life/padhai-dost/go-backend/internal/api/middleware"
-	"github.com/regular-life/padhai-dost/go-backend/internal/auth"
-	"github.com/regular-life/padhai-dost/go-backend/internal/config"
+	"github.com/regular-life/CouncilAI/go-backend/internal/api/handlers"
+	"github.com/regular-life/CouncilAI/go-backend/internal/api/middleware"
+	"github.com/regular-life/CouncilAI/go-backend/internal/auth"
+	"github.com/regular-life/CouncilAI/go-backend/internal/config"
 )
 
 func NewRouter(cfg *config.Config, h *handlers.Handlers, authHandler *handlers.AuthHandler, jwtManager *auth.JWTManager) *chi.Mux {

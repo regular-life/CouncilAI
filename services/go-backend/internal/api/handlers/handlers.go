@@ -12,26 +12,29 @@ import (
 	"strings"
 	"time"
 
-	"github.com/regular-life/padhai-dost/go-backend/internal/api/middleware"
-	"github.com/regular-life/padhai-dost/go-backend/internal/audit"
-	"github.com/regular-life/padhai-dost/go-backend/internal/cache"
-	"github.com/regular-life/padhai-dost/go-backend/internal/council"
-	"github.com/regular-life/padhai-dost/go-backend/internal/metrics"
+	"github.com/regular-life/CouncilAI/go-backend/internal/api/middleware"
+	"github.com/regular-life/CouncilAI/go-backend/internal/audit"
+	"github.com/regular-life/CouncilAI/go-backend/internal/cache"
+	"github.com/regular-life/CouncilAI/go-backend/internal/cache/fastcache"
+	"github.com/regular-life/CouncilAI/go-backend/internal/council"
+	"github.com/regular-life/CouncilAI/go-backend/internal/metrics"
 )
 
 type Handlers struct {
 	RAGServiceURL string
 	Council       *council.Orchestrator
 	Cache         *cache.RedisCache
+	FastCache     *fastcache.SemanticCache
 	Audit         *audit.Logger
 	HTTPClient    *http.Client
 }
 
-func NewHandlers(ragURL string, council *council.Orchestrator, redisCache *cache.RedisCache, auditLogger *audit.Logger) *Handlers {
+func NewHandlers(ragURL string, council *council.Orchestrator, redisCache *cache.RedisCache, fastCache *fastcache.SemanticCache, auditLogger *audit.Logger) *Handlers {
 	return &Handlers{
 		RAGServiceURL: ragURL,
 		Council:       council,
 		Cache:         redisCache,
+		FastCache:     fastCache,
 		Audit:         auditLogger,
 		HTTPClient:    &http.Client{Timeout: 120 * time.Second},
 	}
@@ -54,8 +57,6 @@ type QueryResponse struct {
 	CacheHit     bool                      `json:"cache_hit"`
 }
 
-// HandleQuery checks cache, retrieves document chunks, runs the LLM council,
-// caches the result, and returns the synthesized answer.
 func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	userID := middleware.GetUserID(r.Context())
@@ -75,12 +76,28 @@ func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 
 	queryHash := fmt.Sprintf("%x", sha256.Sum256([]byte(req.Question)))[:16]
 
+	vector, err := h.getEmbedding(req.Question)
+	if err == nil && len(vector) == 384 {
+		var semCachedResponse QueryResponse
+		if h.FastCache.Get(req.DocID, vector, 0.85, &semCachedResponse) {
+			semCachedResponse.CacheHit = true
+			semCachedResponse.Latency = time.Since(start).String()
+			h.Audit.LogQuery(userID, req.DocID, queryHash, time.Since(start), "semantic_cache_hit")
+			metrics.CacheHits.WithLabelValues("hit", "l1").Inc()
+			jsonResponse(w, semCachedResponse)
+			return
+		}
+		metrics.CacheHits.WithLabelValues("miss", "l1").Inc()
+	} else if err != nil {
+		log.Printf("[Query] Failed to get embedding for semantic cache: %v", err)
+	}
+
 	cacheKey := cache.CacheKey(req.DocID, req.Question)
 	var cachedResponse QueryResponse
 	if found, err := h.Cache.Get(r.Context(), cacheKey, &cachedResponse); err == nil && found {
 		cachedResponse.CacheHit = true
 		cachedResponse.Latency = time.Since(start).String()
-		h.Audit.LogQuery(userID, req.DocID, queryHash, time.Since(start), "cache_hit")
+		h.Audit.LogQuery(userID, req.DocID, queryHash, time.Since(start), "redis_cache_hit")
 		jsonResponse(w, cachedResponse)
 		return
 	}
@@ -121,12 +138,17 @@ func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	if err := h.Cache.Set(r.Context(), cacheKey, response); err != nil {
 		log.Printf("[Query] Cache set failed: %v", err)
 	}
+	
+	if len(vector) == 384 {
+		if err := h.FastCache.Put(req.DocID, vector, response); err != nil {
+			log.Printf("[Query] Semantic cache put failed: %v", err)
+		}
+	}
 
 	h.Audit.LogQuery(userID, req.DocID, queryHash, time.Since(start), "success")
 	jsonResponse(w, response)
 }
 
-// HandleIngest proxies file upload to the Python RAG service.
 func (h *Handlers) HandleIngest(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	userID := middleware.GetUserID(r.Context())
@@ -201,8 +223,6 @@ func (h *Handlers) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, status)
 }
 
-// --- Explain ---
-
 type ExplainRequest struct {
 	DocID          string   `json:"doc_id"`
 	KnowledgeLevel string   `json:"knowledge_level"`
@@ -225,7 +245,6 @@ type ExplainResponse struct {
 	CacheHit    bool             `json:"cache_hit"`
 }
 
-// HandleExplain generates a knowledge-level-adaptive explanation of a document.
 func (h *Handlers) HandleExplain(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	userID := middleware.GetUserID(r.Context())
@@ -331,8 +350,6 @@ Respond with a well-structured explanation.`, contextText, levelInstruction, dep
 	jsonResponse(w, response)
 }
 
-// --- Generate Questions ---
-
 type GenerateQuestionsRequest struct {
 	DocID        string `json:"doc_id"`
 	NumQuestions int    `json:"num_questions"`
@@ -358,8 +375,6 @@ type GenerateQuestionsResponse struct {
 	CacheHit   bool                `json:"cache_hit"`
 }
 
-// HandleGenerateQuestions creates assessment questions from a document.
-// Uses skipChairman=true to preserve structured JSON output.
 func (h *Handlers) HandleGenerateQuestions(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	userID := middleware.GetUserID(r.Context())
@@ -488,10 +503,6 @@ Respond ONLY with the JSON array.`, contextText, req.NumQuestions, questionTypeI
 	jsonResponse(w, response)
 }
 
-// --- JSON sanitization helpers ---
-
-// extractQuestionsJSON pulls a JSON array out of LLM output that may include
-// markdown code fences, control characters, and invalid backslash escapes.
 func extractQuestionsJSON(s string) string {
 	s = strings.TrimSpace(s)
 	if strings.HasPrefix(s, "```json") {
@@ -524,8 +535,6 @@ func stripControlChars(s string) string {
 	return b.String()
 }
 
-// sanitizeJSONBackslashes double-escapes backslashes that aren't valid JSON
-// escape sequences (handles LaTeX like \Lambda, \theta, etc).
 func sanitizeJSONBackslashes(s string) string {
 	var result strings.Builder
 	result.Grow(len(s))
@@ -547,8 +556,6 @@ func sanitizeJSONBackslashes(s string) string {
 	}
 	return result.String()
 }
-
-// --- RAG service communication ---
 
 func (h *Handlers) retrieveAllChunks(docID string) ([]string, error) {
 	reqBody := map[string]string{"doc_id": docID}
@@ -621,6 +628,33 @@ func (h *Handlers) retrieveChunks(r *http.Request, req QueryRequest) ([]string, 
 		chunks[i] = c.Content
 	}
 	return chunks, nil
+}
+
+func (h *Handlers) getEmbedding(text string) ([]float32, error) {
+	reqBody := map[string]string{"text": text}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal error: %w", err)
+	}
+
+	resp, err := h.HTTPClient.Post(h.RAGServiceURL+"/embed", "application/json", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("embed request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("embed failed (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Embedding []float32 `json:"embedding"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode error: %w", err)
+	}
+	return result.Embedding, nil
 }
 
 type LoginRequest struct {

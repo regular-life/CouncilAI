@@ -10,14 +10,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/regular-life/padhai-dost/go-backend/internal/api"
-	"github.com/regular-life/padhai-dost/go-backend/internal/api/handlers"
-	"github.com/regular-life/padhai-dost/go-backend/internal/audit"
-	"github.com/regular-life/padhai-dost/go-backend/internal/auth"
-	"github.com/regular-life/padhai-dost/go-backend/internal/cache"
-	"github.com/regular-life/padhai-dost/go-backend/internal/config"
-	"github.com/regular-life/padhai-dost/go-backend/internal/council"
-	"github.com/regular-life/padhai-dost/go-backend/internal/llm"
+	"github.com/regular-life/CouncilAI/go-backend/internal/api"
+	"github.com/regular-life/CouncilAI/go-backend/internal/api/handlers"
+	"github.com/regular-life/CouncilAI/go-backend/internal/audit"
+	"github.com/regular-life/CouncilAI/go-backend/internal/auth"
+	"github.com/regular-life/CouncilAI/go-backend/internal/cache"
+	"github.com/regular-life/CouncilAI/go-backend/internal/cache/fastcache"
+	"github.com/regular-life/CouncilAI/go-backend/internal/config"
+	"github.com/regular-life/CouncilAI/go-backend/internal/council"
+	"github.com/regular-life/CouncilAI/go-backend/internal/llm"
 )
 
 func main() {
@@ -27,6 +28,8 @@ func main() {
 
 	jwtManager := auth.NewJWTManager(cfg.JWTSecret, cfg.JWTExpiration)
 	redisCache := cache.NewRedisCache(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+	semCache := fastcache.NewSemanticCache(5000)
+	defer semCache.Destroy()
 	auditLogger := audit.NewLogger()
 
 	var councilClients []llm.LLMClient
@@ -39,7 +42,7 @@ func main() {
 	chairmanClient := llm.NewGeminiClient(cfg.GeminiAPIKey, cfg.ChairmanModel, cfg.StageTimeout)
 	councilOrchestrator := council.NewOrchestrator(councilClients, chairmanClient, cfg.StageTimeout)
 
-	h := handlers.NewHandlers(cfg.RAGServiceURL, councilOrchestrator, redisCache, auditLogger)
+	h := handlers.NewHandlers(cfg.RAGServiceURL, councilOrchestrator, redisCache, semCache, auditLogger)
 	authHandler := handlers.NewAuthHandler(jwtManager)
 	router := api.NewRouter(cfg, h, authHandler, jwtManager)
 

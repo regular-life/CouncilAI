@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/regular-life/padhai-dost/go-backend/internal/metrics"
+	"github.com/regular-life/CouncilAI/go-backend/internal/metrics"
 )
 
 type statusWriter struct {

@@ -10,7 +10,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/regular-life/padhai-dost/go-backend/internal/metrics"
+	"github.com/regular-life/CouncilAI/go-backend/internal/metrics"
 )
 
 type RedisCache struct {
@@ -39,14 +39,14 @@ func CacheKey(docID, question string) string {
 func (c *RedisCache) Get(ctx context.Context, key string, dest interface{}) (bool, error) {
 	val, err := c.client.Get(ctx, key).Result()
 	if err == redis.Nil {
-		metrics.CacheHits.WithLabelValues("miss").Inc()
+		metrics.CacheHits.WithLabelValues("miss", "l2").Inc()
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("redis get failed: %w", err)
 	}
 
-	metrics.CacheHits.WithLabelValues("hit").Inc()
+	metrics.CacheHits.WithLabelValues("hit", "l2").Inc()
 	if err := json.Unmarshal([]byte(val), dest); err != nil {
 		return false, fmt.Errorf("cache unmarshal failed: %w", err)
 	}

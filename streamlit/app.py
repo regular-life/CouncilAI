@@ -1,10 +1,3 @@
-"""
-PadhAI-Dost — Streamlit Demo Client.
-
-Thin frontend that communicates with the Go backend API.
-All intelligence is in the backend services — this is purely a UI layer.
-"""
-
 import streamlit as st
 import requests
 import json
@@ -14,7 +7,7 @@ import os
 API_BASE = os.getenv("API_BASE_URL", "http://localhost:8080")
 REQUEST_TIMEOUT = 180  # seconds
 
-st.set_page_config(page_title="PadhAI Dost", page_icon="📚", layout="wide")
+st.set_page_config(page_title="CouncilAI", page_icon="📚", layout="wide")
 
 _DEFAULTS = {
     "chat_history": [],
@@ -95,7 +88,7 @@ def login_section():
                     st.error(resp.json().get("error", "Registration failed"))
             except requests.ConnectionError:
                 st.error("Cannot connect to backend. Is it running?")
-st.header("📚 PadhAI Dost")
+st.header("📚 CouncilAI")
 
 if not st.session_state.token:
     login_section()

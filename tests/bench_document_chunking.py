@@ -78,16 +78,13 @@ def benchmark(pages: int, iterations: int = 10):
     avg_latency_ms = (sum(latencies) / len(latencies)) * 1000
     print(f"  Iterations: {iterations}")
     print(f"  Resulting Chunks: {len(chunks)}")
-    print(f"  Average Latency: {avg_latency_ms:.2f} ms")
-    print("-" * 50)
+    print(f"  Average Latency: {avg_latency_ms:.2f} ms\n")
 
 if __name__ == "__main__":
     import logging
     logging.getLogger("app.chunking.layout_chunker").setLevel(logging.WARNING)
 
-    print("=" * 50)
     benchmark(10, iterations=50)
     benchmark(50, iterations=20)
     benchmark(200, iterations=10)
     benchmark(1000, iterations=5)
-    print("=" * 50)

@@ -1,5 +1,3 @@
-"""PadhAI-Dost Python RAG Service — FastAPI entrypoint."""
-
 import logging
 from contextlib import asynccontextmanager
 
@@ -7,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import ingest, retrieve, retrieve_all
+from app.routers import ingest, retrieve, retrieve_all, embed
 from app.models import HealthResponse
 
 logging.basicConfig(
@@ -33,7 +31,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="PadhAI-Dost RAG Service",
+    title="CouncilAI RAG Service",
     description="Document intelligence API with adaptive OCR, layout-aware chunking, and semantic retrieval.",
     version="1.0.0",
     lifespan=lifespan,
@@ -50,6 +48,7 @@ app.add_middleware(
 app.include_router(ingest.router, tags=["Ingestion"])
 app.include_router(retrieve.router, tags=["Retrieval"])
 app.include_router(retrieve_all.router, tags=["Retrieval"])
+app.include_router(embed.router, tags=["Embedding"])
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])

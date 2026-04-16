@@ -10,7 +10,8 @@ services:
       - SERVER_PORT=8080
       - RAG_SERVICE_URL=http://python-rag:8000
       - REDIS_ADDR=redis:6379
-      - JWT_SECRET=${JWT_SECRET:-padhai-dost-secret-change-me}
+      - JWT_SECRET=${JWT_SECRET:-councilai-secret-change-me}
+      - MOCK_LLM=true
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - COUNCIL_MODEL_1=${COUNCIL_MODEL_1:-arcee-ai/trinity-large-preview:free}
@@ -26,7 +27,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks:
-      - padhai-net
+      - councilai-net
 
   # ── Python RAG Service ───────────────────────────────────────────────
   python-rag:
@@ -48,7 +49,7 @@ services:
       start_period: 30s
     restart: unless-stopped
     networks:
-      - padhai-net
+      - councilai-net
 
   # ── Redis ────────────────────────────────────────────────────────────
   redis:
@@ -64,7 +65,7 @@ services:
       retries: 3
     restart: unless-stopped
     networks:
-      - padhai-net
+      - councilai-net
 
   # ── Prometheus ──────────────────────────────────────────────────────
   prometheus:
@@ -78,7 +79,7 @@ services:
       - go-backend
     restart: unless-stopped
     networks:
-      - padhai-net
+      - councilai-net
 
   # ── Grafana ─────────────────────────────────────────────────────────
   grafana:
@@ -97,7 +98,7 @@ services:
       - prometheus
     restart: unless-stopped
     networks:
-      - padhai-net
+      - councilai-net
 
 volumes:
   chroma-data:
@@ -107,5 +108,5 @@ volumes:
 
 
 networks:
-  padhai-net:
+  councilai-net:
     driver: bridge

@@ -6,12 +6,12 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/regular-life/padhai-dost/go-backend/internal/auth"
+	"github.com/regular-life/CouncilAI/go-backend/internal/auth"
 )
 
 type AuthHandler struct {
 	jwtManager *auth.JWTManager
-	users      map[string]string // username -> bcrypt hash (in-memory demo store)
+	users      map[string]string
 }
 
 func NewAuthHandler(jwtManager *auth.JWTManager) *AuthHandler {

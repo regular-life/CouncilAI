@@ -81,6 +81,14 @@ class RetrieveAllResponse(BaseModel):
     total_chunks: int
 
 
+class EmbedRequest(BaseModel):
+    text: str
+
+
+class EmbedResponse(BaseModel):
+    embedding: list[float]
+
+
 class HealthResponse(BaseModel):
     status: str = "healthy"
     version: str = "1.0.0"

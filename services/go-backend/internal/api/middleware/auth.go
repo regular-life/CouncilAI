@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/regular-life/padhai-dost/go-backend/internal/auth"
+	"github.com/regular-life/CouncilAI/go-backend/internal/auth"
 )
 
 type contextKey string
