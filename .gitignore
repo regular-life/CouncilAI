@@ -3,6 +3,7 @@
 # Environment & secrets
 .env
 TODO.md
+docs/
 
 # Python
 __pycache__/
