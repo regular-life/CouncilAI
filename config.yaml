@@ -1,0 +1,73 @@
+# CouncilAI Central Configuration File
+# General settings are defined here. Sensitive API keys should be injected via env variables.
+
+server:
+  port: "8080"
+  debug: false
+  jwt_secret: "council-ai-secret-change-me"
+  jwt_expiration: "24h"
+  rate_limit:
+    rps: 10
+    burst: 20
+
+rag:
+  service_url: "http://python-rag:8000"
+  chroma_db_path: "/data/chroma_db"
+  embedding_model: "BAAI/bge-small-en-v1.5"
+  reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
+
+providers:
+  openrouter_url: "https://openrouter.ai/api/v1/chat/completions"
+  nvidia_nim_url: "https://integrate.api.nvidia.com/v1/chat/completions"
+  vllm_url: "http://vllm-inference:8001/v1/chat/completions"
+
+# Note: API keys should ideally be passed via environment variables (prefixed with GEMINI_, etc.)
+# for security, but can also be defined here for testing.
+keys:
+  gemini: ""
+  openrouter: ""
+  nvidia_nim: ""
+
+council:
+  size: 3
+  slots:
+    - provider: "openrouter"
+      model: "openrouter/free"
+    - provider: "openrouter"
+      model: "openrouter/free"
+    - provider: "openrouter"
+      model: "openrouter/free"
+  chairman:
+    provider: "gemini"
+    model: "gemini-2.5-flash"
+  router:
+    provider: "gemini"
+    model: "gemini-2.5-flash"
+  timeouts:
+    stage: "30s"
+    llm: "120s"
+    request: "120s"
+
+# vLLM Local Inference Service Settings
+# -------------------------------------------------------------
+# Note: The system will AUTO-ENABLE local model serving if any
+# council slot, chairman, or router is configured with provider: "local".
+# If using Docker Compose, make sure to start the services with:
+#   docker compose --profile local-models up --build
+vllm:
+  enabled: false # Automatically overridden to true if provider "local" is configured
+  model_name: "microsoft/Phi-4-mini-instruct"
+  dtype: "auto"
+  max_model_len: 4096
+  gpu_memory_utilization: 0.85
+  quantization: "none"
+  tensor_parallel_size: 1
+  swap_space_gb: 0
+  max_num_seqs: 16
+  kv_cache_dtype: "auto"
+  cpu_offload_gb: 0

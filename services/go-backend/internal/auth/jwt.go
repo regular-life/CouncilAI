@@ -30,7 +30,7 @@ func (m *JWTManager) GenerateToken(userID string) (string, error) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(m.expiration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "padhai-dost",
+			Issuer:    "council-ai",
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

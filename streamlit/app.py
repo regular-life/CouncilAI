@@ -3,11 +3,12 @@ import requests
 import json
 import re
 import os
+import uuid
 
 API_BASE = os.getenv("API_BASE_URL", "http://localhost:8080")
 REQUEST_TIMEOUT = 180  # seconds
 
-st.set_page_config(page_title="CouncilAI", page_icon="📚", layout="wide")
+st.set_page_config(page_title="CouncilAI", page_icon="🧠", layout="wide")
 
 _DEFAULTS = {
     "chat_history": [],
@@ -16,25 +17,47 @@ _DEFAULTS = {
     "token": None,
     "user_id": None,
     "doc_id": None,
+    "session_id": None,
 }
 for _key, _val in _DEFAULTS.items():
     if _key not in st.session_state:
         st.session_state[_key] = _val
+
+# Generate a session ID on first load for multi-turn conversations
+if st.session_state.session_id is None:
+    st.session_state.session_id = str(uuid.uuid4())[:8]
+
+
 def api_headers():
     if st.session_state.token:
         return {"Authorization": f"Bearer {st.session_state.token}"}
     return {}
+
+
 def meta_caption(data: dict) -> str:
     parts = [
         f"Confidence: {data.get('confidence', 0):.0%}",
         f"Source: {data.get('source', 'unknown')}",
         f"Latency: {data.get('latency', '?')}",
     ]
+    if data.get("strategy"):
+        strategy_icons = {
+            "direct": "⚡ Direct",
+            "council": "🏛️ Council",
+            "council_deep": "🔬 Deep Council",
+        }
+        parts.append(strategy_icons.get(data["strategy"], data["strategy"]))
     if data.get("cache_hit"):
-        parts.append("⚡ Cache hit")
+        parts.append("💾 Cache hit")
     if data.get("peer_reviewed"):
         parts.append("📝 Peer reviewed")
+    if data.get("reflection"):
+        ref = data["reflection"]
+        faithful = "✓" if ref.get("faithful") else "✗"
+        parts.append(f"🔍 Self-checked (faithful: {faithful})")
     return " · ".join(parts)
+
+
 def try_parse_questions(raw: str) -> list:
     try:
         cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', raw)
@@ -45,6 +68,8 @@ def try_parse_questions(raw: str) -> list:
     except (json.JSONDecodeError, ValueError):
         pass
     return []
+
+
 def login_section():
     st.sidebar.header("🔐 Authentication")
     tab_login, tab_register = st.sidebar.tabs(["Login", "Register"])
@@ -88,54 +113,97 @@ def login_section():
                     st.error(resp.json().get("error", "Registration failed"))
             except requests.ConnectionError:
                 st.error("Cannot connect to backend. Is it running?")
-st.header("📚 CouncilAI")
+
+
+# ── Header ───────────────────────────────────────────────────────────
+st.header("🧠 CouncilAI")
 
 if not st.session_state.token:
     login_section()
     st.info("Please log in to continue. Default: demo / demo123")
     st.stop()
 
-# Sidebar: logged-in state
+# ── Sidebar: logged-in state ─────────────────────────────────────────
 st.sidebar.markdown(f"**Logged in as:** {st.session_state.user_id}")
 if st.sidebar.button("Logout"):
     for key in _DEFAULTS:
         st.session_state[key] = _DEFAULTS[key]
     st.rerun()
 
+# ── Sidebar: Document Upload (Optional) ─────────────────────────────
 with st.sidebar:
-    st.header("📄 Document Upload")
-    uploaded_file = st.file_uploader("Upload a PDF or Image", type=["pdf", "png", "jpg"])
+    with st.expander("📎 Attach a Document (optional)", expanded=False):
+        uploaded_file = st.file_uploader(
+            "Upload a PDF or Image", type=["pdf", "png", "jpg"]
+        )
 
-    if uploaded_file and st.button("Ingest Document"):
-        with st.spinner("Ingesting..."):
-            try:
-                resp = requests.post(
-                    f"{API_BASE}/api/v1/ingest",
-                    headers=api_headers(),
-                    files={"file": (uploaded_file.name, uploaded_file.read())},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    st.session_state.doc_id = data["doc_id"]
-                    st.success(
-                        f"✅ Ingested {data['chunk_count']} chunks "
-                        f"(OCR: {data['metadata'].get('file_type', 'unknown')})"
+        if uploaded_file and st.button("Ingest Document"):
+            with st.spinner("Ingesting..."):
+                try:
+                    resp = requests.post(
+                        f"{API_BASE}/api/v1/ingest",
+                        headers=api_headers(),
+                        files={"file": (uploaded_file.name, uploaded_file.read())},
                     )
-                else:
-                    st.error(f"Ingestion failed: {resp.text}")
-            except requests.ConnectionError:
-                st.error("Cannot connect to backend")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        st.session_state.doc_id = data["doc_id"]
+                        st.success(
+                            f"✅ Ingested {data['chunk_count']} chunks "
+                            f"(OCR: {data['metadata'].get('file_type', 'unknown')})"
+                        )
+                    else:
+                        st.error(f"Ingestion failed: {resp.text}")
+                except requests.ConnectionError:
+                    st.error("Cannot connect to backend")
 
-    if st.session_state.doc_id:
-        st.info(f"Active document: `{st.session_state.doc_id}`")
+        if st.session_state.doc_id:
+            st.info(f"Active document: `{st.session_state.doc_id}`")
+            if st.button("❌ Detach Document"):
+                st.session_state.doc_id = None
+                st.rerun()
 
+    # ── Session management ───────────────────────────────────────────
+    st.divider()
+    st.caption(f"Session: `{st.session_state.session_id}`")
+    if st.button("🔄 New Conversation"):
+        st.session_state.chat_history = []
+        st.session_state.session_id = str(uuid.uuid4())[:8]
+        # Clear server-side conversation
+        try:
+            requests.post(
+                f"{API_BASE}/api/v1/conversation/clear",
+                headers=api_headers(),
+                json={"session_id": st.session_state.session_id},
+                timeout=5,
+            )
+        except Exception:
+            pass
+        st.rerun()
+
+
+# ── Tabs ─────────────────────────────────────────────────────────────
 ask_tab, explain_tab, questions_tab = st.tabs(
     ["💬 Ask", "📖 Explain", "📝 Generate Questions"]
 )
 
+# ── Ask Tab ──────────────────────────────────────────────────────────
 with ask_tab:
+    # Context indicator
+    context_parts = []
+    if st.session_state.doc_id:
+        context_parts.append(f"📄 Document: `{st.session_state.doc_id}`")
+    if len(st.session_state.chat_history) > 0:
+        context_parts.append(
+            f"💬 {len([m for m in st.session_state.chat_history if m['role'] == 'user'])} turns in conversation"
+        )
+    if not context_parts:
+        context_parts.append("🌐 General knowledge mode (no document attached)")
+    st.caption(" · ".join(context_parts))
+
     if st.button("Clear Chat", key="clear_chat"):
         st.session_state.chat_history = []
+        st.session_state.session_id = str(uuid.uuid4())[:8]
 
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
@@ -143,49 +211,52 @@ with ask_tab:
             if msg.get("meta"):
                 st.caption(msg["meta"])
 
-    user_question = st.chat_input("Ask a question about the document")
+    user_question = st.chat_input("Ask anything — with or without a document")
     if user_question:
-        if not st.session_state.doc_id:
-            st.warning("Please upload and ingest a document first.")
-        else:
-            st.session_state.chat_history.append(
-                {"role": "user", "content": user_question}
-            )
-            with st.spinner("Thinking... (Multi-LLM Council in action)"):
-                try:
-                    resp = requests.post(
-                        f"{API_BASE}/api/v1/query",
-                        headers=api_headers(),
-                        json={
-                            "question": user_question,
-                            "doc_id": st.session_state.doc_id,
-                        },
-                        timeout=REQUEST_TIMEOUT,
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "content": data["answer"],
-                            "meta": meta_caption(data),
-                        })
-                    else:
-                        st.session_state.chat_history.append({
-                            "role": "assistant",
-                            "content": f"❌ Error: {resp.json().get('error', resp.text)}",
-                        })
-                except requests.ConnectionError:
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": "❌ Cannot connect to backend. Is it running?",
-                    })
-                except requests.Timeout:
-                    st.session_state.chat_history.append({
-                        "role": "assistant",
-                        "content": "⏱️ Request timed out. The LLM Council may need more time.",
-                    })
-            st.rerun()
+        st.session_state.chat_history.append(
+            {"role": "user", "content": user_question}
+        )
+        with st.spinner("Thinking... (Multi-LLM Council in action)"):
+            try:
+                payload = {
+                    "question": user_question,
+                    "session_id": st.session_state.session_id,
+                }
+                # Only include doc_id if a document is attached
+                if st.session_state.doc_id:
+                    payload["doc_id"] = st.session_state.doc_id
 
+                resp = requests.post(
+                    f"{API_BASE}/api/v1/query",
+                    headers=api_headers(),
+                    json=payload,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": data["answer"],
+                        "meta": meta_caption(data),
+                    })
+                else:
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": f"❌ Error: {resp.json().get('error', resp.text)}",
+                    })
+            except requests.ConnectionError:
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": "❌ Cannot connect to backend. Is it running?",
+                })
+            except requests.Timeout:
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": "⏱️ Request timed out. The LLM Council may need more time.",
+                })
+        st.rerun()
+
+# ── Explain Tab ──────────────────────────────────────────────────────
 with explain_tab:
     if not st.session_state.doc_id:
         st.info("Upload and ingest a document first to generate explanations.")
@@ -265,6 +336,7 @@ with explain_tab:
                 st.session_state.explain_history = []
                 st.rerun()
 
+# ── Generate Questions Tab ───────────────────────────────────────────
 with questions_tab:
     if not st.session_state.doc_id:
         st.info("Upload and ingest a document first to generate questions.")

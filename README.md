@@ -1,10 +1,15 @@
-# CouncilAI: Multi-LLM Document Engine
+# CouncilAI: Multi-Agent Deliberation & Self-Reflective Document Engine
 
-A document Q&A system built around a multi-LLM council. Upload a PDF, ask questions, and get answers that have been independently generated, peer-reviewed, and synthesized across multiple language models.
+CouncilAI is a highly agentic document deliberation and Q&A engine built around a multi-agent LLM council. Upload a PDF, ask questions, and get answers that are independently generated, peer-reviewed, and synthesized across an ensemble of collaborative language models.
 
-The council pattern is inspired by [Karpathy's LLM Council](https://github.com/karpathy/llm-council) — instead of trusting a single model, three models answer independently, review each other's work, and a chairman synthesizes the final response.
+The council pattern is inspired by [Karpathy's LLM Council](https://github.com/karpathy/llm-council) — instead of trusting a single model, CouncilAI deploys a multi-agent pipeline:
+1. **Router Agent**: Dynamically classifies query intent and routes to the most efficient mode (L1 Cache, Direct Mode, or Full Council).
+2. **Council Member Agents**: Multi-model agents that generate candidate answers in parallel.
+3. **Peer-Review Loop**: Agents cross-evaluate and rank each other's responses.
+4. **Chairman Agent**: Moderates and synthesizes the candidate answers and peer reviews.
+5. **Self-Reflection & Revision Loop**: In deep mode, a reflection agent audits the synthesized answer for quality and faithfulness, dynamically triggering a correction and revision pass if issues are detected.
 
-Originally built as a study tool ("PadhAI Dost" = "Study Friend" in Hindi), the architecture is general-purpose and works for any document-grounded Q&A task.
+Originally built as a study tool under the legacy name "PadhAI Dost" ("Study Friend" in Hindi), the architecture is general-purpose and works for any complex, document-grounded knowledge task.
 
 ---
 
@@ -18,9 +23,12 @@ graph TB
         Router["Chi Router"]
         Auth["JWT Auth"]
         RL["Rate Limiter"]
+        Handlers["Request Handlers<br/>(query / ingest / explain)"]
+        RouterAgent["Router Agent<br/>(intent routing)"]
         SemCache["L1 Semantic Cache<br/>(C++ SIMD Vector)"]
         Cache["L2 Redis Cache"]
-        Council["LLM Council<br/>(3-stage)"]
+        Council["Multi-Agent Council<br/>(Deliberation Pipeline)"]
+        Reflect["Self-Reflection Agent<br/>(Revision Loop)"]
         Metrics["Prometheus<br/>/metrics"]
         Audit["Audit Logger"]
     end
@@ -34,10 +42,10 @@ graph TB
     end
 
     subgraph LLMs["LLM Providers"]
-        M1["Council Model 1"]
-        M2["Council Model 2"]
-        M3["Council Model 3"]
-        Chairman["Chairman<br/>(Gemini)"]
+        M1["Council Model 1<br/>(OpenRouter / Local vLLM)"]
+        M2["Council Model 2<br/>(OpenRouter / Local vLLM)"]
+        M3["Council Model 3<br/>(OpenRouter / Local vLLM)"]
+        Chairman["Chairman Agent<br/>(Gemini / local)"]
     end
 
     subgraph Monitoring["Monitoring"]
@@ -48,14 +56,17 @@ graph TB
     Redis[("Redis · :6379")]
 
     Client --> Router
-    Router --> Auth --> RL
-    RL --> Handlers
+    Router --> Auth --> RL --> Handlers
     Handlers -->|Vector Search| SemCache
     SemCache -->|miss| Cache
-    Cache -->|miss| Council
+    Cache -->|miss| RouterAgent
+    RouterAgent -->|direct mode| Chairman
+    RouterAgent -->|council mode| Council
     Council -->|retrieve chunks| Python
     Council -->|fan-out| M1 & M2 & M3
     Council -->|synthesize| Chairman
+    Chairman -->|deep mode| Reflect
+    Reflect -->|needs revision| Chairman
     Router --> Metrics
     Router --> Audit
 
@@ -92,21 +103,38 @@ sequenceDiagram
             R-->>G: Cached response
             G-->>C: 200 OK (cache_hit: true)
         else L2 Double Miss
-            G->>P: POST /retrieve (question, doc_id)
-            P->>P: Embed → ChromaDB search
-            P-->>G: Top-K document chunks
+            G->>G: Router Agent classifies query intent
 
-            Note over G,L: Stage 1 — Individual Responses
-            G->>L: Fan-out to 3 LLMs (parallel)
-            L-->>G: 3 independent answers
+            alt Direct Mode (Simple query)
+                G->>L: Query Chairman Model directly
+                L-->>G: Direct Answer
+            else Council Mode (Complex query)
+                G->>P: POST /retrieve (question, doc_id)
+                P->>P: Embed → ChromaDB search
+                P-->>G: Top-K document chunks
 
-            Note over G,L: Stage 2 — Peer Review
-            G->>L: Each model ranks others' answers
-            L-->>G: Rankings + reasoning
+                Note over G,L: Stage 1 — Individual Responses
+                G->>L: Fan-out to 3 LLMs (parallel)
+                L-->>G: 3 independent answers
 
-            Note over G,L: Stage 3 — Chairman Synthesis
-            G->>L: Chairman sees all answers + reviews
-            L-->>G: Final synthesized answer
+                Note over G,L: Stage 2 — Peer Review
+                G->>L: Each model ranks others' answers
+                L-->>G: Rankings + reasoning
+
+                Note over G,L: Stage 3 — Chairman Synthesis
+                G->>L: Chairman synthesizes answers + reviews
+                L-->>G: Final synthesized answer
+            end
+
+            alt Deep Mode Active (Reflection Loop)
+                Note over G,L: Stage 4 — Self-Reflection & Revision
+                G->>L: Reflection Agent audits answer quality & faithfulness
+                L-->>G: Audit Result (e.g., "needs_revision")
+                alt Needs Revision
+                    G->>L: Chairman generates corrected/revised answer
+                    L-->>G: Revised Answer
+                end
+            end
 
             G->>G: Store in L1 Semantic Cache
             G->>R: Store in L2 Redis Cache
@@ -121,23 +149,24 @@ sequenceDiagram
 
 ### Prerequisites
 
-- Docker and Docker Compose
-- An [OpenRouter](https://openrouter.ai/) API key (free tier works)
-- A [Gemini](https://aistudio.google.com/apikey) API key
+* **Docker and Docker Compose** (Required)
+* **LLM Access Option A: Online APIs** (Optional): An [OpenRouter](https://openrouter.ai/) and/or [Gemini](https://aistudio.google.com/apikey) API key.
+* **LLM Access Option B: Local Models** (Optional): A GPU-enabled system to run local vLLM models (making the stack **100% offline and free of API fees**).
 
 ### 1. Clone and Configure
 
 ```bash
 git clone https://github.com/regular-life/CouncilAI
 cd CouncilAI
-cp .env.example .env
+./setup.sh
 ```
 
-Open `.env` and add your API keys:
-```bash
-GEMINI_API_KEY=your-gemini-key
-OPENROUTER_API_KEY=your-openrouter-key
-```
+The interactive `./setup.sh` script automatically:
+* Copies `.env.example` to `.env` (preserving any existing keys).
+* Generates a high-entropy cryptographically secure random `JWT_SECRET`.
+* Prompts you to optionally input your Gemini, OpenRouter, and NVIDIA NIM keys.
+
+*(Alternatively, you can manually copy `.env.example` to `.env` and fill in the values.)*
 
 ### 2. Run
 
@@ -145,6 +174,11 @@ OPENROUTER_API_KEY=your-openrouter-key
 docker compose up --build
 ```
 
+#### Running Local Models (vLLM)
+If you configure any agent in `config.yaml` to use provider `local` (e.g. `provider: local`), local vLLM model execution is **automatically enabled**. Simply start the services using the `local-models` docker profile:
+```bash
+docker compose --profile local-models up --build
+```
 This starts five containers:
 - **Go backend** at `http://localhost:8080`
 - **Python RAG** at `http://localhost:8000` (internal)
@@ -304,17 +338,17 @@ The **CouncilAI** dashboard includes:
 
 ## Configuration
 
-All configuration is via environment variables (see [`.env.example`](.env.example)):
+Configuration is managed via a centralized [`config.yaml`](config.yaml) in the root of the workspace. Sensitive API keys and orchestration flags are overlaid with environment variables (taking precedence) to safeguard secrets:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GEMINI_API_KEY` | — | Required. For chairman synthesis |
-| `OPENROUTER_API_KEY` | — | Required. For council models |
-| `COUNCIL_MODEL_1/2/3` | See .env.example | Council LLMs via OpenRouter |
-| `CHAIRMAN_MODEL` | `gemini-3-flash-preview` | Synthesis model via Gemini |
-| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Local embedding model |
-| `STAGE_TIMEOUT` | `30s` | Per-stage timeout |
-| `LLM_TIMEOUT` | `120s` | Overall timeout |
+### 1. Configuration File (config.yaml)
+General parameters (timeouts, ports, local models, council seats) are defined in one central place. In production, Docker Compose automatically mounts this file as a read-only volume (`/app/config.yaml`) inside both backend and RAG containers.
+
+### 2. Environment Overrides
+Sensitive credentials can be supplied via a `.env` file or host env vars:
+- `GEMINI_API_KEY` (Required for Gemini)
+- `OPENROUTER_API_KEY` (Required for OpenRouter)
+- `NVIDIA_NIM_API_KEY` (Required for NVIDIA NIM)
+- `MOCK_LLM` (Set `true` to run offline mock responses during testing)
 
 ---
 

@@ -63,6 +63,7 @@ class RetrieveRequest(BaseModel):
     question: str
     doc_id: Optional[str] = None
     top_k: int = 5
+    rerank: bool = True
 
 
 class RetrieveResponse(BaseModel):

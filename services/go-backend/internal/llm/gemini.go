@@ -24,16 +24,32 @@ func NewGeminiClient(apiKey, model string, timeout time.Duration) *GeminiClient 
 	}
 }
 
+// ── Gemini API types ────────────────────────────────────────────────
+
 type geminiRequest struct {
-	Contents []geminiContent `json:"contents"`
+	Contents          []geminiContent          `json:"contents"`
+	SystemInstruction *geminiContent           `json:"systemInstruction,omitempty"`
+	GenerationConfig  *geminiGenerationConfig  `json:"generationConfig,omitempty"`
+	Tools             []geminiTool             `json:"tools,omitempty"`
+}
+
+type geminiTool struct {
+	GoogleSearch *struct{} `json:"googleSearch,omitempty"`
 }
 
 type geminiContent struct {
+	Role  string       `json:"role,omitempty"`
 	Parts []geminiPart `json:"parts"`
 }
 
 type geminiPart struct {
 	Text string `json:"text"`
+}
+
+type geminiGenerationConfig struct {
+	Temperature      *float64 `json:"temperature,omitempty"`
+	MaxOutputTokens  int      `json:"maxOutputTokens,omitempty"`
+	ResponseMimeType string   `json:"responseMimeType,omitempty"`
 }
 
 type geminiResponse struct {
@@ -52,14 +68,70 @@ type geminiResponse struct {
 	} `json:"usageMetadata"`
 }
 
+// ── Interface implementation ────────────────────────────────────────
+
+// Generate sends a single prompt — backward-compatible wrapper around GenerateChat.
 func (c *GeminiClient) Generate(ctx context.Context, prompt string) (*Response, error) {
-	reqBody := geminiRequest{
-		Contents: []geminiContent{{
-			Parts: []geminiPart{{Text: prompt}},
-		}},
+	return c.GenerateChat(ctx, GenerateOptions{
+		Messages: []Message{{Role: "user", Content: prompt}},
+	})
+}
+
+// GenerateChat sends a full multi-turn conversation with system prompt support.
+func (c *GeminiClient) GenerateChat(ctx context.Context, opts GenerateOptions) (*Response, error) {
+	req := geminiRequest{}
+
+	// Build generation config
+	genCfg := &geminiGenerationConfig{}
+	hasGenCfg := false
+	if opts.Temperature != nil {
+		genCfg.Temperature = opts.Temperature
+		hasGenCfg = true
+	}
+	if opts.MaxTokens > 0 {
+		genCfg.MaxOutputTokens = opts.MaxTokens
+		hasGenCfg = true
+	}
+	if opts.ResponseJSON {
+		genCfg.ResponseMimeType = "application/json"
+		hasGenCfg = true
+	}
+	if hasGenCfg {
+		req.GenerationConfig = genCfg
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
+	if opts.EnableSearch {
+		req.Tools = []geminiTool{{GoogleSearch: &struct{}{}}}
+	}
+
+	// Map messages to Gemini format
+	for _, msg := range opts.Messages {
+		switch msg.Role {
+		case "system":
+			// Gemini uses a dedicated systemInstruction field
+			req.SystemInstruction = &geminiContent{
+				Parts: []geminiPart{{Text: msg.Content}},
+			}
+		case "user":
+			req.Contents = append(req.Contents, geminiContent{
+				Role:  "user",
+				Parts: []geminiPart{{Text: msg.Content}},
+			})
+		case "assistant":
+			// Gemini calls this "model"
+			req.Contents = append(req.Contents, geminiContent{
+				Role:  "model",
+				Parts: []geminiPart{{Text: msg.Content}},
+			})
+		}
+	}
+
+	// Must have at least one content entry
+	if len(req.Contents) == 0 {
+		return nil, fmt.Errorf("at least one user or assistant message is required")
+	}
+
+	jsonBody, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -69,13 +141,13 @@ func (c *GeminiClient) Generate(ctx context.Context, prompt string) (*Response, 
 		c.model, c.apiKey,
 	)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("Gemini request failed: %w", err)
 	}

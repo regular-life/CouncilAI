@@ -1,10 +1,3 @@
-"""
-Layout-aware OCR backend.
-
-Uses pdfplumber for structured extraction of tables, paragraphs,
-and layout information from PDF documents.
-"""
-
 import io
 import logging
 from pathlib import Path
@@ -16,40 +9,34 @@ logger = logging.getLogger(__name__)
 
 
 class LayoutAwareOCR(OCRBackend):
-    """
-    Layout-aware OCR backend using pdfplumber.
-    Extracts tables as structured blocks and paragraphs separately.
-    """
+    """Layout-aware OCR backend using pdfplumber for table and layout structure preservation."""
 
     def name(self) -> str:
         return "layout_aware"
 
     def process(self, file_bytes: bytes, filename: str) -> OCRResult:
-        """Extract structured content from PDFs using pdfplumber."""
+        """Process input file using layout-aware page extraction."""
         ext = Path(filename).suffix.lower()
 
         if ext != ".pdf":
-            logger.warning(
-                f"LayoutAwareOCR is optimized for PDFs, got {ext}. "
-                "Falling back to basic extraction."
-            )
+            logger.warning(f"LayoutAwareOCR is optimized for PDFs, got {ext}. Falling back to basic extraction.")
             return self._fallback_extraction(file_bytes, filename, ext)
 
         return self._process_pdf(file_bytes, filename)
 
     def _process_pdf(self, file_bytes: bytes, filename: str) -> OCRResult:
-        """Process a PDF with layout-aware extraction."""
+        """Extract tables and surrounding paragraphs using pdfplumber."""
         import pdfplumber
 
         blocks: list[OCRBlock] = []
         page_count = 0
 
+        # TODO: Parallelize page extraction loop for large PDF documents.
         try:
             with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
                 page_count = len(pdf.pages)
 
                 for page_num, page in enumerate(pdf.pages, start=1):
-                    # Extract tables first
                     tables = page.extract_tables()
                     table_bboxes = []
 
@@ -69,14 +56,26 @@ class LayoutAwareOCR(OCRBackend):
                                     )
                                 )
 
-                    # Extract text outside tables
-                    text = page.extract_text() or ""
+                    # Filter out characters that fall within table bounding boxes to prevent double-extraction.
+                    if table_bboxes:
+                        def not_in_table(obj):
+                            if obj.get("object_type") != "char":
+                                return True
+                            x0, top, x1, bottom = obj["x0"], obj["top"], obj["x1"], obj["bottom"]
+                            # TODO: Use intersection over area ratio instead of simple coordinate bounds overlap check.
+                            for tx0, ty0, tx1, ty1 in table_bboxes:
+                                if tx0 <= x0 <= tx1 and ty0 <= top <= ty1:
+                                    return False
+                            return True
+                        non_table_page = page.filter(not_in_table)
+                        text = non_table_page.extract_text() or ""
+                    else:
+                        text = page.extract_text() or ""
+
                     if text.strip():
-                        # Split into paragraphs by double newlines
                         paragraphs = self._split_paragraphs(text)
                         for para in paragraphs:
                             if para.strip():
-                                # Try to classify the paragraph
                                 block_type = self._classify_block(para)
                                 blocks.append(
                                     OCRBlock(
@@ -102,7 +101,7 @@ class LayoutAwareOCR(OCRBackend):
         )
 
     def _format_table(self, table: list[list]) -> str:
-        """Format a table as a markdown-style string."""
+        """Format 2D table array into markdown-style string representation."""
         if not table:
             return ""
 
@@ -111,22 +110,16 @@ class LayoutAwareOCR(OCRBackend):
             cells = [str(cell).strip() if cell else "" for cell in row]
             rows.append("| " + " | ".join(cells) + " |")
 
-        # Add header separator after first row
         if len(rows) > 1:
-            header = rows[0]
             separator = "| " + " | ".join(["---"] * len(table[0])) + " |"
             rows.insert(1, separator)
 
         return "\n".join(rows)
 
     def _split_paragraphs(self, text: str) -> list[str]:
-        """Split text into paragraphs using heuristics."""
-        # Split on double newlines
+        """Split page text into paragraphs using double newlines and capital-sentence cues."""
         paragraphs = text.split("\n\n")
 
-        # If no double newlines, try to split on single newlines with
-        # heuristic: a new paragraph starts with a capital letter after
-        # a line ending with a period
         if len(paragraphs) <= 1:
             lines = text.split("\n")
             result: list[str] = []
@@ -158,30 +151,24 @@ class LayoutAwareOCR(OCRBackend):
         return paragraphs
 
     def _classify_block(self, text: str) -> ChunkType:
-        """Classify a text block by type using heuristics."""
+        """Classify block type (heading, caption, list, paragraph) using heuristics."""
         stripped = text.strip()
 
-        # Heading: short, no period at end, often capitalized
         if len(stripped) < 100 and not stripped.endswith(".") and stripped[0].isupper():
             words = stripped.split()
             if len(words) <= 10:
                 return ChunkType.HEADING
 
-        # Caption: starts with "Figure", "Table", "Fig.", etc.
         caption_prefixes = ("figure", "fig.", "fig ", "table", "chart", "diagram")
         if stripped.lower().startswith(caption_prefixes):
             return ChunkType.CAPTION
 
-        # List: starts with bullet or number
         if stripped.startswith(("•", "-", "*", "1.", "2.", "3.")):
             return ChunkType.LIST
 
         return ChunkType.PARAGRAPH
 
-    def _fallback_extraction(
-        self, file_bytes: bytes, filename: str, ext: str
-    ) -> OCRResult:
-        """Fallback for non-PDF files."""
+    def _fallback_extraction(self, file_bytes: bytes, filename: str, ext: str) -> OCRResult:
+        """Fallback for non-PDF image extractions."""
         from app.ocr.tesseract import TesseractOCR
-
         return TesseractOCR().process(file_bytes, filename)

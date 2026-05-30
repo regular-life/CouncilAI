@@ -31,6 +31,7 @@ async def retrieve_chunks(request: RetrieveRequest):
             query=request.question,
             doc_id=request.doc_id,
             top_k=request.top_k,
+            rerank=request.rerank,
         )
 
         return RetrieveResponse(

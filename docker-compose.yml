@@ -7,19 +7,12 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - SERVER_PORT=8080
-      - RAG_SERVICE_URL=http://python-rag:8000
-      - REDIS_ADDR=redis:6379
-      - JWT_SECRET=${JWT_SECRET:-councilai-secret-change-me}
-      - MOCK_LLM=true
+      - MOCK_LLM=${MOCK_LLM:-false}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - COUNCIL_MODEL_1=${COUNCIL_MODEL_1:-arcee-ai/trinity-large-preview:free}
-      - COUNCIL_MODEL_2=${COUNCIL_MODEL_2:-stepfun/step-3.5-flash:free}
-      - COUNCIL_MODEL_3=${COUNCIL_MODEL_3:-nvidia/nemotron-3-nano-30b-a3b:free}
-      - CHAIRMAN_MODEL=${CHAIRMAN_MODEL:-gemini-3-flash-preview}
-      - STAGE_TIMEOUT=${STAGE_TIMEOUT:-30s}
-      - LLM_TIMEOUT=${LLM_TIMEOUT:-120s}
+      - NVIDIA_NIM_API_KEY=${NVIDIA_NIM_API_KEY}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -36,17 +29,15 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    environment:
-      - CHROMA_DB_PATH=/data/chroma_db
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
     volumes:
       - chroma-data:/data/chroma_db
+      - ./config.yaml:/app/config.yaml:ro
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
-      interval: 30s
+      interval: 20s
       timeout: 10s
-      retries: 3
-      start_period: 30s
+      retries: 10
+      start_period: 300s
     restart: unless-stopped
     networks:
       - councilai-net
@@ -100,11 +91,42 @@ services:
     networks:
       - councilai-net
 
+  # ── vLLM Local Inference (GPU) ──────────────────────────────────────
+  vllm-inference:
+    build:
+      context: ./services/vllm-inference
+    ports:
+      - "8001:8001"
+    environment:
+      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-microsoft/Phi-4-mini-instruct}
+      - VLLM_DTYPE=${VLLM_DTYPE:-auto}
+      - VLLM_MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-4096}
+      - VLLM_GPU_MEMORY_UTIL=${VLLM_GPU_MEMORY_UTIL:-0.85}
+      - VLLM_QUANTIZATION=${VLLM_QUANTIZATION:-}
+      - VLLM_TENSOR_PARALLEL=${VLLM_TENSOR_PARALLEL:-1}
+      - VLLM_SWAP_SPACE_GB=${VLLM_SWAP_SPACE_GB:-0}
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - vllm-models:/data/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    profiles:
+      - local-models
+    restart: unless-stopped
+    networks:
+      - councilai-net
+
 volumes:
   chroma-data:
   redis-data:
   prometheus-data:
   grafana-data:
+  vllm-models:
 
 
 networks:

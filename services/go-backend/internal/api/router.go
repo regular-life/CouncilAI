@@ -48,6 +48,7 @@ func NewRouter(cfg *config.Config, h *handlers.Handlers, authHandler *handlers.A
 		r.Post("/api/v1/ingest", h.HandleIngest)
 		r.Post("/api/v1/explain", h.HandleExplain)
 		r.Post("/api/v1/generate-questions", h.HandleGenerateQuestions)
+		r.Post("/api/v1/conversation/clear", h.HandleClearConversation)
 	})
 
 	return r

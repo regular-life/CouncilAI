@@ -1,7 +1,3 @@
-"""
-Tesseract OCR backend implementation.
-"""
-
 import io
 import logging
 from pathlib import Path
@@ -16,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class TesseractOCR(OCRBackend):
-    """OCR backend using pytesseract for general-purpose text extraction."""
+    """OCR backend using pytesseract for general-purpose image and scanned PDF text extraction."""
 
     def name(self) -> str:
         return "tesseract"
@@ -48,12 +44,9 @@ class TesseractOCR(OCRBackend):
             ocr_method=self.name(),
         )
 
-    def _process_image(
-        self, file_bytes: bytes, pytesseract
-    ) -> list[OCRBlock]:
-        """Process a single image file."""
+    def _process_image(self, file_bytes: bytes, pytesseract) -> list[OCRBlock]:
+        """Extract blocks and confidence details from a single image using image_to_data."""
         img = Image.open(io.BytesIO(file_bytes))
-        # Get detailed OCR data with bounding boxes
         data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
 
         blocks: list[OCRBlock] = []
@@ -67,7 +60,6 @@ class TesseractOCR(OCRBackend):
             conf = float(data["conf"][i])
 
             if block_num != current_block_num:
-                # Flush previous block
                 if current_text_parts:
                     block_text = " ".join(current_text_parts)
                     if block_text.strip():
@@ -88,7 +80,6 @@ class TesseractOCR(OCRBackend):
                 current_text_parts.append(text)
                 current_conf.append(conf)
 
-        # Flush last block
         if current_text_parts:
             block_text = " ".join(current_text_parts)
             if block_text.strip():
@@ -104,33 +95,33 @@ class TesseractOCR(OCRBackend):
 
         return blocks
 
-    def _process_pdf(
-        self, file_bytes: bytes, pytesseract
-    ) -> list[OCRBlock]:
-        """Process a scanned PDF by converting pages to images."""
+    def _process_pdf(self, file_bytes: bytes, pytesseract) -> list[OCRBlock]:
+        """Convert scanned PDF pages to images and process each page."""
         blocks: list[OCRBlock] = []
 
+        # TODO: Support localized language codes dynamically for pytesseract config.
         try:
-            # Use pdf2image to convert PDF pages to images
             from pdf2image import convert_from_bytes
 
+            # TODO: Parallelize page rendering and processing to optimize latency.
             images = convert_from_bytes(file_bytes, dpi=300)
 
             for page_num, img in enumerate(images, start=1):
                 text = pytesseract.image_to_string(img)
                 if text.strip():
-                    blocks.append(
-                        OCRBlock(
-                            content=text.strip(),
-                            block_type=ChunkType.PARAGRAPH,
-                            page_number=page_num,
-                            confidence=0.8,  # Default for full-page OCR
-                        )
-                    )
+                    paragraphs = text.split("\n\n")
+                    for para in paragraphs:
+                        if para.strip():
+                            blocks.append(
+                                OCRBlock(
+                                    content=para.strip(),
+                                    block_type=ChunkType.PARAGRAPH,
+                                    page_number=page_num,
+                                    confidence=0.8,
+                                )
+                            )
         except ImportError:
-            logger.warning(
-                "pdf2image not installed. Falling back to PyPDF2 text extraction."
-            )
+            logger.warning("pdf2image not installed. Falling back to PyPDF2 text extraction.")
             reader = PdfReader(io.BytesIO(file_bytes))
             for page_num, page in enumerate(reader.pages, start=1):
                 text = page.extract_text() or ""

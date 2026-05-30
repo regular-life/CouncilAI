@@ -1,1 +1,1 @@
-# PadhAI-Dost Python RAG Service
+# CouncilAI Python RAG Service

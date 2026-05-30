@@ -3,17 +3,27 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/regular-life/CouncilAI/go-backend/internal/auth"
 )
 
-type AuthHandler struct {
-	jwtManager *auth.JWTManager
-	users      map[string]string
+// LoginRequest defines credentials for authentication endpoints.
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
+// AuthHandler coordinates JWT-based user registrations and logins.
+type AuthHandler struct {
+	jwtManager *auth.JWTManager
+	mu         sync.RWMutex
+	users      map[string]string // Simple memory-map for demo. TODO: Persist users in Redis or relational database.
+}
+
+// NewAuthHandler initializes AuthHandler with demo credentials.
 func NewAuthHandler(jwtManager *auth.JWTManager) *AuthHandler {
 	hash, _ := bcrypt.GenerateFromPassword([]byte("demo123"), bcrypt.DefaultCost)
 	return &AuthHandler{
@@ -24,6 +34,8 @@ func NewAuthHandler(jwtManager *auth.JWTManager) *AuthHandler {
 	}
 }
 
+// HandleLogin authenticates users and issues JWT authorization tokens.
+// TODO: Track failed login attempts in cache to throttle brute-force attacks.
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -35,7 +47,10 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.mu.RLock()
 	storedHash, exists := h.users[req.Username]
+	h.mu.RUnlock()
+
 	if !exists {
 		jsonError(w, "invalid credentials", http.StatusUnauthorized)
 		return
@@ -57,6 +72,8 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleRegister creates a new user and issues a JWT token.
+// TODO: Implement password complexity constraints and email verification routes.
 func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -67,17 +84,22 @@ func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "username and password are required", http.StatusBadRequest)
 		return
 	}
+
+	h.mu.Lock()
 	if _, exists := h.users[req.Username]; exists {
+		h.mu.Unlock()
 		jsonError(w, "user already exists", http.StatusConflict)
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
+		h.mu.Unlock()
 		jsonError(w, "failed to hash password", http.StatusInternalServerError)
 		return
 	}
 	h.users[req.Username] = string(hash)
+	h.mu.Unlock()
 
 	token, err := h.jwtManager.GenerateToken(req.Username)
 	if err != nil {

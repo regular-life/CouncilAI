@@ -26,17 +26,26 @@ func NewOpenRouterClient(apiKey, apiURL, model string, timeout time.Duration) *O
 	}
 }
 
-type openRouterRequest struct {
-	Model    string              `json:"model"`
-	Messages []openRouterMessage `json:"messages"`
+// ── OpenAI-compatible request/response types ────────────────────────
+
+type openAIRequest struct {
+	Model          string            `json:"model"`
+	Messages       []openAIMessage   `json:"messages"`
+	Temperature    *float64          `json:"temperature,omitempty"`
+	MaxTokens      int               `json:"max_tokens,omitempty"`
+	ResponseFormat *openAIRespFormat `json:"response_format,omitempty"`
 }
 
-type openRouterMessage struct {
+type openAIMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type openRouterResponse struct {
+type openAIRespFormat struct {
+	Type string `json:"type"` // "json_object" or "text"
+}
+
+type openAIResponse struct {
 	ID      string `json:"id"`
 	Choices []struct {
 		Message struct {
@@ -51,10 +60,37 @@ type openRouterResponse struct {
 	} `json:"usage"`
 }
 
+// ── Interface implementation ────────────────────────────────────────
+
+// Generate sends a single prompt — backward-compatible wrapper around GenerateChat.
 func (c *OpenRouterClient) Generate(ctx context.Context, prompt string) (*Response, error) {
-	reqBody := openRouterRequest{
-		Model:    c.model,
-		Messages: []openRouterMessage{{Role: "user", Content: prompt}},
+	return c.GenerateChat(ctx, GenerateOptions{
+		Messages: []Message{{Role: "user", Content: prompt}},
+	})
+}
+
+// GenerateChat sends a full multi-turn conversation with system prompt support.
+func (c *OpenRouterClient) GenerateChat(ctx context.Context, opts GenerateOptions) (*Response, error) {
+	reqBody := openAIRequest{
+		Model: c.model,
+	}
+
+	// Map messages
+	for _, msg := range opts.Messages {
+		reqBody.Messages = append(reqBody.Messages, openAIMessage{
+			Role:    msg.Role, // system, user, assistant all map directly
+			Content: msg.Content,
+		})
+	}
+
+	if opts.Temperature != nil {
+		reqBody.Temperature = opts.Temperature
+	}
+	if opts.MaxTokens > 0 {
+		reqBody.MaxTokens = opts.MaxTokens
+	}
+	if opts.ResponseJSON {
+		reqBody.ResponseFormat = &openAIRespFormat{Type: "json_object"}
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -68,7 +104,7 @@ func (c *OpenRouterClient) Generate(ctx context.Context, prompt string) (*Respon
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("HTTP-Referer", "https://github.com/regular-life/PadhAI-Dost")
+	req.Header.Set("HTTP-Referer", "https://github.com/regular-life/CouncilAI")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -85,7 +121,7 @@ func (c *OpenRouterClient) Generate(ctx context.Context, prompt string) (*Respon
 		return nil, fmt.Errorf("OpenRouter API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	var orResp openRouterResponse
+	var orResp openAIResponse
 	if err := json.Unmarshal(body, &orResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}

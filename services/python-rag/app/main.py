@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import ingest, retrieve, retrieve_all, embed
+from app.routers import ingest, retrieve, retrieve_all, embed, search
 from app.models import HealthResponse
 
 logging.basicConfig(
@@ -17,14 +17,21 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Handles startup and shutdown lifecycle events."""
     logger.info("Starting Python RAG Service...")
     settings = get_settings()
 
     from app.embedding.transformer import TransformerEmbeddings
+    from app.retrieval.reranker import Reranker
 
+    # Preload embedding and reranking models at startup.
     logger.info(f"Preloading embedding model: {settings.embedding_model}")
     TransformerEmbeddings(settings.embedding_model)
     logger.info("Embedding model loaded successfully")
+
+    logger.info(f"Preloading reranker model: {settings.reranker_model}")
+    Reranker(settings.reranker_model)
+    logger.info("Reranker model loaded successfully")
 
     yield
     logger.info("Shutting down Python RAG Service")
@@ -37,6 +44,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# TODO: Configure dynamic CORS whitelist mapping from config.yaml.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -49,10 +57,12 @@ app.include_router(ingest.router, tags=["Ingestion"])
 app.include_router(retrieve.router, tags=["Retrieval"])
 app.include_router(retrieve_all.router, tags=["Retrieval"])
 app.include_router(embed.router, tags=["Embedding"])
+app.include_router(search.router, tags=["Web Search"])
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
+    """Returns the service health status."""
     return HealthResponse()
 
 

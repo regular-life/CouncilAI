@@ -1,7 +1,7 @@
 apiVersion: 1
 
 providers:
-  - name: "PadhAI-Dost"
+  - name: "CouncilAI"
     orgId: 1
     folder: ""
     type: file

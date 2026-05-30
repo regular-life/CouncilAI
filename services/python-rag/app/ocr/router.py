@@ -1,12 +1,3 @@
-"""
-Adaptive OCR Router.
-
-Selects the appropriate OCR backend based on document inspection metadata:
-- Text layer exists → direct text extraction (skip OCR)
-- Tables detected → layout-aware OCR (pdfplumber)
-- Scanned/image → Tesseract OCR
-"""
-
 import io
 import logging
 from pathlib import Path
@@ -22,18 +13,16 @@ logger = logging.getLogger(__name__)
 
 
 class DirectTextExtractor(OCRBackend):
-    """
-    'OCR' backend that simply extracts embedded text from PDFs.
-    Used when the document already has a text layer — no OCR needed.
-    """
+    """Direct text extractor for PDFs that already possess a clean embedded text layer."""
 
     def name(self) -> str:
         return "direct_text"
 
     def process(self, file_bytes: bytes, filename: str) -> OCRResult:
-        """Extract text directly from PDF text layer."""
+        """Extract embedded text directly from the PDF pages."""
         blocks: list[OCRBlock] = []
         ext = Path(filename).suffix.lower()
+        page_count = 0
 
         if ext != ".pdf":
             logger.warning("DirectTextExtractor only supports PDFs")
@@ -45,10 +34,10 @@ class DirectTextExtractor(OCRBackend):
 
         try:
             reader = PdfReader(io.BytesIO(file_bytes))
+            page_count = len(reader.pages)
             for page_num, page in enumerate(reader.pages, start=1):
                 text = page.extract_text() or ""
                 if text.strip():
-                    # Split into paragraphs
                     paragraphs = text.split("\n\n")
                     for para in paragraphs:
                         if para.strip():
@@ -68,38 +57,29 @@ class DirectTextExtractor(OCRBackend):
             metadata=DocumentMetadata(
                 file_name=filename,
                 file_type=ext,
-                page_count=len(blocks),
+                page_count=page_count,
             ),
             ocr_method=self.name(),
         )
 
 
+# TODO: Implement page character-density threshold checks before direct routing.
 def route_ocr(file_bytes: bytes, filename: str, metadata: DocumentMetadata) -> OCRResult:
-    """
-    Route to the appropriate OCR backend based on document metadata.
-
-    Decision logic:
-        if text layer exists:
-            skip OCR → direct text extraction
-        elif tables detected:
-            use layout-aware OCR
-        else:
-            use Tesseract OCR
-    """
+    """Choose the most appropriate extraction backend based on document metadata."""
     backend: OCRBackend
 
     if metadata.has_text_layer and not metadata.is_scanned:
         if metadata.has_tables:
-            logger.info(f"Routing {filename} → layout-aware OCR (text + tables)")
+            logger.info(f"Routing {filename} to layout_aware (tables found)")
             backend = LayoutAwareOCR()
         else:
-            logger.info(f"Routing {filename} → direct text extraction (text layer found)")
+            logger.info(f"Routing {filename} to direct_text (text layer found)")
             backend = DirectTextExtractor()
     elif metadata.has_tables:
-        logger.info(f"Routing {filename} → layout-aware OCR (tables detected)")
+        logger.info(f"Routing {filename} to layout_aware (tables found)")
         backend = LayoutAwareOCR()
     else:
-        logger.info(f"Routing {filename} → Tesseract OCR (scanned/image)")
+        logger.info(f"Routing {filename} to tesseract (scanned/image)")
         backend = TesseractOCR()
 
     result = backend.process(file_bytes, filename)

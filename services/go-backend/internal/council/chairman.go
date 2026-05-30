@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"github.com/regular-life/CouncilAI/go-backend/internal/llm"
 )
 
+// ChairmanResult holds the synthesized output from the chairman model.
 type ChairmanResult struct {
 	Answer     string  `json:"answer"`
 	Reasoning  string  `json:"reasoning"`
@@ -15,6 +18,49 @@ type ChairmanResult struct {
 	Confidence float64 `json:"confidence"`
 }
 
+// ReflectionResult holds the quality assessment from the reflection loop.
+type ReflectionResult struct {
+	Quality    string  `json:"quality"`    // "good" | "needs_revision"
+	Issues     string  `json:"issues"`     // What's wrong (empty if good)
+	Suggestion string  `json:"suggestion"` // How to fix (empty if good)
+	Faithful   bool    `json:"faithful"`   // Is the answer grounded in sources?
+	Confidence float64 `json:"confidence"` // Revised confidence score
+}
+
+const chairmanSystemPrompt = `You are the Chairman of an AI council. Multiple AI models have independently answered a question, and their peers have reviewed and ranked the answers. Your job is to synthesize the best possible final answer.
+
+Your task:
+1. Consider all responses and the peer review feedback
+2. Identify the strongest and weakest points across all answers
+3. Synthesize a single, authoritative final answer
+4. Rate your confidence in the final answer (0.0 to 1.0)
+
+Respond ONLY in JSON format:
+{
+  "answer": "Your synthesized final answer",
+  "reasoning": "How you synthesized the answer and which responses contributed most",
+  "source": "chairman-synthesis",
+  "confidence": 0.85
+}`
+
+const reflectionSystemPrompt = `You are a quality assurance agent reviewing an AI-generated answer. Your job is to critically evaluate the answer for accuracy, completeness, and faithfulness to source material.
+
+Evaluate the answer on these criteria:
+1. Faithfulness — Is every claim grounded in the provided sources? (If no sources provided, is the answer factually reasonable?)
+2. Relevance — Does the answer actually address the question asked?
+3. Completeness — Are there important aspects the answer missed?
+4. Consistency — Are there internal contradictions?
+
+Respond ONLY in JSON format:
+{
+  "quality": "good" or "needs_revision",
+  "issues": "Description of problems found (empty string if none)",
+  "suggestion": "How to improve (empty string if good)",
+  "faithful": true/false,
+  "confidence": 0.0-1.0
+}`
+
+// chairmanSynthesize calls the chairman model to produce a synthesized answer.
 func (o *Orchestrator) chairmanSynthesize(
 	question string,
 	chunks []string,
@@ -38,36 +84,21 @@ func (o *Orchestrator) chairmanSynthesize(
 		reviewsText = strings.Join(reviewsBlock, "\n\n")
 	}
 
-	prompt := fmt.Sprintf(`You are the Chairman of an AI council. Multiple AI models have answered a question, and their peers have reviewed and ranked the answers. Your job is to synthesize the best possible final answer.
+	// Build context section — only include document excerpts if we have them
+	contextSection := ""
+	if len(chunks) > 0 {
+		contextSection = fmt.Sprintf("\nDocument Excerpts:\n%s\n", strings.Join(chunks, "\n\n---\n\n"))
+	}
 
-		Question: %s
+	userMsg := fmt.Sprintf(`Question: %s
+%s
+Individual Responses:
+%s
 
-		Document Excerpts:
-		%s
-
-		Individual Responses:
-		%s
-
-		Peer Reviews:
-		%s
-
-		Your task:
-		1. Consider all responses and the peer review feedback
-		2. Identify the strongest and weakest points across all answers
-		3. Synthesize a single, authoritative final answer
-		4. Rate your confidence in the final answer
-
-		Respond in JSON format:
-		{
-		"answer": "Your synthesized final answer here",
-		"reasoning": "Brief explanation of how you synthesized the answer and which responses contributed most",
-		"source": "chairman-synthesis",
-		"confidence": 0.85
-		}
-
-		Respond ONLY with valid JSON, no other text.`,
+Peer Reviews:
+%s`,
 		question,
-		strings.Join(chunks, "\n\n---\n\n"),
+		contextSection,
 		strings.Join(responsesBlock, "\n\n"),
 		reviewsText,
 	)
@@ -75,7 +106,13 @@ func (o *Orchestrator) chairmanSynthesize(
 	ctx, cancel := context.WithTimeout(context.Background(), o.stageTimeout)
 	defer cancel()
 
-	resp, err := o.chairmanClient.Generate(ctx, prompt)
+	resp, err := o.chairmanClient.GenerateChat(ctx, llm.GenerateOptions{
+		Messages: []llm.Message{
+			{Role: "system", Content: chairmanSystemPrompt},
+			{Role: "user", Content: userMsg},
+		},
+		ResponseJSON: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("chairman generation failed: %w", err)
 	}
@@ -93,6 +130,101 @@ func (o *Orchestrator) chairmanSynthesize(
 	}
 	if result.Source == "" {
 		result.Source = "chairman:" + o.chairmanClient.ModelName()
+	}
+
+	return result, nil
+}
+
+// Reflect evaluates the quality of a council answer. Only called for
+// "council_deep" strategy. Returns a quality assessment that may trigger
+// a revision pass.
+func (o *Orchestrator) Reflect(ctx context.Context, question string, chunks []string, answer string) (*ReflectionResult, error) {
+	contextSection := ""
+	if len(chunks) > 0 {
+		contextSection = fmt.Sprintf("\nSource Material:\n%s\n", strings.Join(chunks, "\n\n---\n\n"))
+	}
+
+	userMsg := fmt.Sprintf(`Question: %s
+%s
+Answer to evaluate:
+%s`, question, contextSection, answer)
+
+	reflectCtx, cancel := context.WithTimeout(ctx, o.stageTimeout)
+	defer cancel()
+
+	resp, err := o.chairmanClient.GenerateChat(reflectCtx, llm.GenerateOptions{
+		Messages: []llm.Message{
+			{Role: "system", Content: reflectionSystemPrompt},
+			{Role: "user", Content: userMsg},
+		},
+		Temperature:  llm.Float64Ptr(0.2),
+		ResponseJSON: true,
+		MaxTokens:    500,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reflection failed: %w", err)
+	}
+
+	result := &ReflectionResult{}
+	jsonStr := extractJSON(resp.Answer)
+	if err := json.Unmarshal([]byte(jsonStr), result); err != nil {
+		log.Printf("[Council] Reflection JSON parse failed: %v", err)
+		// Default to passing — don't block on reflection failure
+		return &ReflectionResult{
+			Quality:    "good",
+			Faithful:   true,
+			Confidence: 0.7,
+		}, nil
+	}
+
+	return result, nil
+}
+
+// reviseAnswer asks the chairman to improve an answer based on reflection feedback.
+func (o *Orchestrator) reviseAnswer(ctx context.Context, question string, chunks []string, originalAnswer string, reflection *ReflectionResult) (*ChairmanResult, error) {
+	contextSection := ""
+	if len(chunks) > 0 {
+		contextSection = fmt.Sprintf("\nDocument Excerpts:\n%s\n", strings.Join(chunks, "\n\n---\n\n"))
+	}
+
+	userMsg := fmt.Sprintf(`Question: %s
+%s
+Your previous answer:
+%s
+
+Quality review feedback:
+- Issues: %s
+- Suggestion: %s
+
+Please revise your answer to address the issues identified. Maintain accuracy and faithfulness to sources.`,
+		question, contextSection, originalAnswer, reflection.Issues, reflection.Suggestion)
+
+	reviseCtx, cancel := context.WithTimeout(ctx, o.stageTimeout)
+	defer cancel()
+
+	resp, err := o.chairmanClient.GenerateChat(reviseCtx, llm.GenerateOptions{
+		Messages: []llm.Message{
+			{Role: "system", Content: chairmanSystemPrompt},
+			{Role: "user", Content: userMsg},
+		},
+		ResponseJSON: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("revision failed: %w", err)
+	}
+
+	result := &ChairmanResult{}
+	jsonStr := extractJSON(resp.Answer)
+	if err := json.Unmarshal([]byte(jsonStr), result); err != nil {
+		result = &ChairmanResult{
+			Answer:     resp.Answer,
+			Reasoning:  "Revised answer (JSON parse failed)",
+			Source:     "chairman-revised:" + o.chairmanClient.ModelName(),
+			Confidence: 0.75,
+		}
+	}
+	if result.Source == "" {
+		result.Source = "chairman-revised:" + o.chairmanClient.ModelName()
 	}
 
 	return result, nil
