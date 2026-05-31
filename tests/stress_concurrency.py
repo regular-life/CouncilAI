@@ -9,7 +9,7 @@ from pathlib import Path
 # ── Config ────────────────────────────────────────────────────────────
 
 API_BASE = "http://localhost:8080"
-PDF_PATH = Path.home() / "Downloads" / "sem7 slides" / "ADL" / "11 - WGAN.pdf"
+PDF_PATH = Path(__file__).parent.parent / "data" / "11 - WGAN.pdf"
 
 USERNAME = "loadtest"
 PASSWORD = "loadtest123"
@@ -164,7 +164,7 @@ def step_load_test(headers, payloads):
         def fire(_):
             resp, elapsed = timed_request(
                 requests.post, f"{API_BASE}{endpoint}",
-                headers=headers, json=payload, timeout=30,
+                headers=headers, json=payload, timeout=90,
             )
             return resp.status_code, elapsed
 

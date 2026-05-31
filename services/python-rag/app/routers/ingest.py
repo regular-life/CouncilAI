@@ -73,6 +73,18 @@ async def ingest_document(
         chunks = chunk_document(ocr_result)
         logger.info(f"Chunks created: {len(chunks)}")
 
+        # Step 3.5: BME Sampling for preview text
+        preview_text = ""
+        n_chunks = len(chunks)
+        if n_chunks <= 9:
+            preview_text = "\n".join([c.content for c in chunks])
+        else:
+            bme_chunks = chunks[:3] + chunks[n_chunks//2 - 1 : n_chunks//2 + 2] + chunks[-3:]
+            preview_text = "\n".join([c.content for c in bme_chunks])
+            
+        if len(preview_text) > 15000:
+            preview_text = preview_text[:15000]
+
         # Step 4: Embed and store
         store = ChromaStore()
         chunk_count = store.ingest(chunks, doc_id)
@@ -81,6 +93,7 @@ async def ingest_document(
             doc_id=doc_id,
             chunk_count=chunk_count,
             metadata=metadata,
+            preview_text=preview_text,
             message=f"Successfully ingested {chunk_count} chunks using {ocr_result.ocr_method} OCR",
         )
 

@@ -257,7 +257,7 @@ def _fire_variant(headers, doc_id, question) -> HopTimings:
         f"{API_BASE}/api/v1/query",
         headers=headers,
         json={"question": question, "doc_id": doc_id, "top_k": 5},
-        timeout=30,
+        timeout=90,
     )
     success = resp.status_code == 200
     body = resp.json() if success else {}

@@ -48,6 +48,9 @@ council:
   router:
     provider: "gemini"
     model: "gemini-2.5-flash"
+  ingestion:
+    provider: "gemini"
+    model: "gemini-2.5-flash"
   timeouts:
     stage: "30s"
     llm: "120s"

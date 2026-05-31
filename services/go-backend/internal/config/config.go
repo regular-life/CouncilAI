@@ -55,8 +55,9 @@ type Config struct {
 
 	CouncilSize  int
 	CouncilSlots []ModelSlot
-	ChairmanSlot ModelSlot
-	RouterSlot   ModelSlot
+	ChairmanSlot  ModelSlot
+	RouterSlot    ModelSlot
+	IngestionSlot ModelSlot
 
 	StageTimeout   time.Duration
 	LLMTimeout     time.Duration
@@ -112,6 +113,10 @@ type yamlSchema struct {
 			Provider string `yaml:"provider"`
 			Model    string `yaml:"model"`
 		} `yaml:"router"`
+		Ingestion struct {
+			Provider string `yaml:"provider"`
+			Model    string `yaml:"model"`
+		} `yaml:"ingestion"`
 		Timeouts struct {
 			Stage   string `yaml:"stage"`
 			LLM     string `yaml:"llm"`
@@ -251,6 +256,15 @@ func Load() *Config {
 		routerModel = "gemini-3-flash-preview"
 	}
 
+	ingestionProvider := getEnv("INGESTION_PROVIDER", y.Council.Ingestion.Provider)
+	if ingestionProvider == "" {
+		ingestionProvider = "gemini"
+	}
+	ingestionModel := getEnv("INGESTION_MODEL", y.Council.Ingestion.Model)
+	if ingestionModel == "" {
+		ingestionModel = "gemini-3-flash-preview"
+	}
+
 	// 5. Execution Timeouts.
 	stageTimeout := parseDuration(getEnv("STAGE_TIMEOUT", y.Council.Timeouts.Stage), 30*time.Second)
 	llmTimeout := parseDuration(getEnv("LLM_TIMEOUT", y.Council.Timeouts.LLM), 120*time.Second)
@@ -330,10 +344,11 @@ func Load() *Config {
 			CPUOffloadGB:         vllmCPUOffload,
 		},
 
-		CouncilSize:  cSize,
-		CouncilSlots: slots,
-		ChairmanSlot: ModelSlot{Provider: chairmanProvider, Model: chairmanModel},
-		RouterSlot:   ModelSlot{Provider: routerProvider, Model: routerModel},
+		CouncilSize:   cSize,
+		CouncilSlots:  slots,
+		ChairmanSlot:  ModelSlot{Provider: chairmanProvider, Model: chairmanModel},
+		RouterSlot:    ModelSlot{Provider: routerProvider, Model: routerModel},
+		IngestionSlot: ModelSlot{Provider: ingestionProvider, Model: ingestionModel},
 
 		StageTimeout:   stageTimeout,
 		LLMTimeout:     llmTimeout,

@@ -27,6 +27,7 @@ type Handlers struct {
 	FastCache     *fastcache.SemanticCache
 	Audit         *audit.Logger
 	Router        *agent.Router
+	IngestAgent   *agent.IngestAgent
 	Memory        *memory.ConversationStore
 	HTTPClient    *http.Client
 }
@@ -40,6 +41,7 @@ func NewHandlers(
 	fastCache *fastcache.SemanticCache,
 	auditLogger *audit.Logger,
 	router *agent.Router,
+	ingestAgent *agent.IngestAgent,
 	memoryStore *memory.ConversationStore,
 ) *Handlers {
 	transport := &http.Transport{
@@ -62,6 +64,7 @@ func NewHandlers(
 		FastCache:     fastCache,
 		Audit:         auditLogger,
 		Router:        router,
+		IngestAgent:   ingestAgent,
 		Memory:        memoryStore,
 		HTTPClient:    &http.Client{Timeout: 120 * time.Second, Transport: transport},
 	}

@@ -5,67 +5,60 @@
 ![Docker](https://img.shields.io/badge/Docker-Supported-2496ED?style=flat&logo=docker)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
 
-**CouncilAI** is a highly agentic document deliberation and Q&A engine built around a multi-agent LLM council. 
+CouncilAI is an open-source, multi-agent document deliberation and Q&A engine. 
+It replaces single-model inference with an ensemble "council-of-agents" architecture to process documents and generate reliable, cross-reviewed answers.
 
-Upload a PDF, ask questions, and get answers that are independently generated, peer-reviewed, and synthesized across an ensemble of collaborative language models.
+## Architecture
 
----
+CouncilAI coordinates a multi-agent workflow:
+1. **Router Agent**: Analyzes user queries (and optional document summaries) using BME (Beginning-Middle-End) sampling to route requests dynamically to Direct Mode, the LLM Council, or Web Search fallback.
+2. **Council Member Agents**: Concurrent multi-model agents that generate candidate answers in parallel.
+3. **Peer-Review Loop**: Agents cross-evaluate and rank candidate responses.
+4. **Chairman Agent**: Synthesizes the final consensus response, including confidence scores.
+5. **Self-Reflection Agent**: Audits the result for quality and triggers a revision loop if needed.
 
-### 🚀 TL;DR
-Instead of trusting a single LLM, CouncilAI deploys a multi-agent pipeline:
-1. **Router Agent**: Classifies query intent and routes to L1 Cache, Direct Mode, or Full Council.
-2. **Council Member Agents**: Multi-model agents generate candidate answers in parallel.
-3. **Peer-Review Loop**: Agents cross-evaluate and rank each other's responses.
-4. **Chairman Agent**: Moderates and synthesizes the final consensus.
-5. **Self-Reflection Agent**: Audits the synthesized answer and triggers a revision loop if needed.
+The backend infrastructure relies on a Go control plane for parallel orchestration and a Python microservice for RAG operations (OCR, chunking, and embedding). It utilizes a high-performance C++ SIMD Semantic Cache to bypass redundant LLM calls.
 
-## 🧠 Key Features
+## Quick Start
 
-* **Higher Accuracy**: Multi-model consensus outperforms single-model inference.
-* **Confidence Scoring**: Every answer carries a numeric confidence rating and reasoning trace.
-* **Cost Optimization**: C++ SIMD Semantic Caching prevents redundant LLM calls (240x speedup).
-* **100% Offline Capability**: Plug-and-play support for local vLLM models for zero-fee, private execution.
-* **Web-Search Grounding**: Fallback real-time search context when no document is provided.
+### Prerequisites
+- Docker and Docker Compose
+- An OpenRouter API key or local vLLM endpoint configuration (configured in `.env`)
 
-## 🏗️ Architecture
-
-```mermaid
-graph LR
-    Client["Client"] --> Router["Go Control Plane<br/>(Router, Auth, Orchestrator)"]
-    Router -->|Cache Hit| L1["C++ SIMD Semantic Cache"]
-    Router -->|Cache Miss| Council["LLM Council<br/>(Fan-out, Peer Review, Synthesis)"]
-    Council -->|Retrieve Context| RAG["Python RAG<br/>(Adaptive OCR, ChromaDB)"]
-    Council --> LLMs["OpenRouter / Local vLLM / Gemini"]
-```
-*For deep technical diagrams and data flows, read the [System Design Document](docs/architecture/system-design.md).*
-
-## ⚡ Quick Start
+### Setup
 
 ```bash
 git clone https://github.com/regular-life/CouncilAI
 cd CouncilAI
 ./setup.sh
-docker compose up --build
+docker compose up --build -d
 ```
-*   **UI**: Open `http://localhost:8501` (Login: `demo` / `demo123`)
-*   **API**: Backend listening at `http://localhost:8080`
 
-For exhaustive setup instructions, including running local offline models, see the [Getting Started Guide](docs/guides/getting-started.md).
+- **UI**: `http://localhost:8501` (Default login: `demo` / `demo123`)
+- **API**: `http://localhost:8080`
 
-## 📚 Documentation Directory
+For comprehensive API endpoints and authentication patterns, refer to the [REST API Reference](docs/api.md).
 
-Deep dive into the architecture and operations using our documentation suite:
+## Documentation
 
-*   **[Getting Started Guide](docs/guides/getting-started.md)**: Full setup instructions.
-*   **[REST API Reference](docs/api/rest-api.md)**: Endpoints, authentication, and payloads.
-*   **[System Design Doc](docs/architecture/system-design.md)**: Google-style design doc covering the deliberation patterns.
-*   **[Technical Details](docs/architecture/technical-details.md)**: Deep dive into the C++ SIMD, RAG OCR, and concurrency patterns.
-*   **[SDLC & Testing](docs/guides/sdlc-and-testing.md)**: How to run the caching benchmarks and concurrency stress tests.
-*   **[Changelog](docs/CHANGELOG.md)**: Version history.
+- **[System Design](docs/DESIGN_DOC.md)**: Architectural overview, data flow, and components.
+- **[API Reference](docs/api.md)**: REST endpoints and payloads.
 
-## 🤝 Contributing
+## Testing and Benchmarks
 
-This is a personal project, but feedback, issues, and pull requests are always welcome! Feel free to open an issue if you spot a bug or have a feature idea.
+The project includes test scripts for verifying semantic cache accuracy and concurrent execution stress testing.
+
+```bash
+# Run semantic cache benchmark
+python3 tests/bench_semantic_accuracy.py
+
+# Run concurrency stress test
+python3 tests/stress_concurrency.py
+```
+
+## Contributing
+
+This is a personal open-source project. Bug reports, feature suggestions, and pull requests are welcome.
 
 ---
 *CouncilAI was originally built under the legacy name "PadhAI Dost" ("Study Friend" in Hindi).*

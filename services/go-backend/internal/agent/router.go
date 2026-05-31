@@ -30,21 +30,28 @@ func NewRouter(client llm.LLMClient) *Router {
 }
 
 const routerSystemPrompt = `You are a query classifier for a multi-LLM council system.
-Given a user question and whether a document is attached, choose the best strategy:
+Given a user question, and optionally a summary of an attached document, choose the best strategy:
 
 - "direct": Simple factual question, greeting, meta-question, or something a single model handles well. One model is enough.
 - "council": Needs multiple perspectives, nuanced reasoning, or a thorough answer. Use the full multi-model council.
 - "council_deep": Complex, ambiguous, high-stakes, or requires careful deliberation with quality verification.
 
 Also decide if the query genuinely needs document context (needs_doc).
-If no document is attached, set needs_doc to false regardless.
-If a document IS attached but the question is generic (e.g. "hello", "what can you do?"), set needs_doc to false.
+If no document summary is provided, set needs_doc to false regardless.
+If a document summary IS provided, evaluate if the user's question is related to the topics in the summary. If the question is completely unrelated (e.g., general knowledge, greetings), set needs_doc to false.
 
-Respond ONLY with JSON: {"strategy":"...", "reasoning":"...", "needs_doc": true/false}`
+Respond ONLY with a raw JSON object and NO OTHER TEXT whatsoever. Do not include markdown code blocks, do not say 'Here is the JSON'. Just output the raw JSON string: {"strategy":"...", "reasoning":"...", "needs_doc": true/false}`
 
 // Plan analyzes a question and returns an execution plan.
-func (r *Router) Plan(ctx context.Context, question string, hasDocument bool) (*QueryPlan, error) {
-	userMsg := fmt.Sprintf("Question: %s\nDocument attached: %v", question, hasDocument)
+func (r *Router) Plan(ctx context.Context, question string, docSummary string) (*QueryPlan, error) {
+	hasDocument := docSummary != ""
+	
+	var userMsg string
+	if hasDocument {
+		userMsg = fmt.Sprintf("Question: %s\nAttached Document Summary:\n%s", question, docSummary)
+	} else {
+		userMsg = fmt.Sprintf("Question: %s\nNo document attached.", question)
+	}
 
 	resp, err := r.client.GenerateChat(ctx, llm.GenerateOptions{
 		Messages: []llm.Message{

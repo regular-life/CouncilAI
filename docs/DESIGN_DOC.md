@@ -6,9 +6,9 @@
 
 ## 1. Context & Scope
 
-**CouncilAI** (originally "PadhAI Dost" — "Study Friend" in Hindi) is a multi-agent document deliberation and Q&A engine that replaces single-model inference with an ensemble **council-of-agents** pattern.
+**CouncilAI** is a multi-agent document deliberation and Q&A engine.
 
-Instead of trusting a single Large Language Model (LLM), CouncilAI coordinates a multi-agent workflow: a **Router Agent** classifies queries, parallel **Council Member Agents** propose responses, a **Peer-Review Loop** cross-evaluates candidates, a **Chairman Agent** synthesizes the consensus, and a **Self-Reflection Agent** audits the results for quality and faithfulness. This produces answers with higher accuracy, built-in confidence scoring, and verifiable reasoning chains.
+Instead of relying on a single Large Language Model (LLM), CouncilAI coordinates a multi-agent workflow: a **Router Agent** classifies queries (using BME sampling for document summary routing), parallel **Council Member Agents** propose responses, a **Peer-Review Loop** cross-evaluates candidates, a **Chairman Agent** synthesizes the consensus, and a **Self-Reflection Agent** audits the results. This produces answers with built-in confidence scoring and reasoning chains.
 
 ### User Journeys (In Scope)
 * **Document Q&A**: Upload a PDF → ask questions → get council-synthesized answers grounded in the document.
@@ -21,11 +21,11 @@ Instead of trusting a single Large Language Model (LLM), CouncilAI coordinates a
 ## 2. Goals & Non-Goals
 
 ### Goals
-1. **Higher accuracy and fidelity** via multi-model consensus (vs. single LLM).
-2. **Confidence scoring** — every answer must carry a numeric confidence rating.
-3. **Cost optimization and High Throughput** — aggressively utilize C++ SIMD Semantic caching and Redis to bypass expensive LLM calls.
-4. **Extensibility** — new LLMs, OCR backends, or features must plug in without core changes.
-5. **Local First** — full support for offline local vLLM models without API fees.
+1. **Consensus-driven accuracy** via multi-model evaluation.
+2. **Confidence scoring** — every answer carries a numeric confidence rating.
+3. **High Throughput** — utilizes C++ SIMD Semantic caching to reduce redundant LLM API calls.
+4. **Extensibility** — designed for modular integration of LLMs and OCR backends.
+5. **Local Compatibility** — support for offline local vLLM models.
 
 ### Non-Goals
 * **Long-Term Multi-Turn Chat Memory**: Persistent, searchable chat history across years is out of scope for the current design phase (stateless sessions are used).
@@ -223,3 +223,31 @@ sequenceDiagram
 #### Gap 5: FIFO Eviction vs. True LRU Caching [RESOLVED]
 * **Description**: `SemanticCache` behaved conceptually as a FIFO cache.
 * **Solution**: Upgraded `Get` lock scopes to `std::unique_lock` on hits to safely promote accessed keys to the front of `lru_list_`.
+
+### 6.1 Engineering Gaps & Solutions
+
+**1. Go/Python Context Propagation**
+* **Gap**: Currently, context cancellation in the Go backend (e.g. client disconnect) is not fully propagated to the Python RAG service during long ingestion or retrieval tasks.
+* **Solution**: Implement context-aware HTTP requests in Go using `req.WithContext(ctx)` when calling the Python service. The Python service (using FastAPI/Starlette) should listen for client disconnects via `request.is_disconnected()`.
+* **Pros**: Prevents dangling resource locks and wasted GPU/CPU cycles on orphaned requests.
+* **Cons**: Requires rewriting Python endpoints to support async polling on `request.is_disconnected()`.
+
+**2. Database Persistence for Users and Logs**
+* **Gap**: Users are stored in an ephemeral in-memory map. Audit logs are written to flat JSON files. 
+* **Solution**: Introduce SQLite or PostgreSQL for relational persistence of users, and ship logs to a robust TSDB or structured logging aggregator like Loki.
+* **Pros**: Enables persistent accounts across restarts and scalable analytics.
+* **Cons**: Increases deployment complexity and requires database migrations.
+
+### 6.2 Conceptual Gaps & Solutions
+
+**1. Document Summary-Aware Routing**
+* **Gap**: The Router agent was previously blind to document content. It routed queries to the LLM Council even when the user asked entirely unrelated questions (e.g. "What is the capital of France?" while a highly technical PDF was attached), wasting expensive RAG retrieval and context window.
+* **Solution**: Implemented BME (Beginning-Middle-End) document sampling in the Python RAG to generate a concise representation of the document upon ingestion. The `IngestAgent` in Go generates a high-level summary, which is injected into the Router's prompt for query classification.
+* **Pros**: Massive cost savings and latency reduction by dynamically skipping RAG and falling back to 'Direct' mode for off-topic queries.
+* **Cons**: The BME summary adds latency during document ingestion (one-time cost) and may miss niche topics hidden deep in large documents.
+
+**2. Metric Evaluation of Council Consensus**
+* **Gap**: The system lacks an automated, scalable way to verify the objective accuracy of the Council's synthesized output against a known ground truth.
+* **Solution**: Implemented a canonical benchmark suite (`tests/bench_semantic_accuracy.py`) to systematically test accuracy and caching latency.
+* **Pros**: Creates an empirical feedback loop for prompt engineering and model selection.
+* **Cons**: Maintaining a high-quality, ground-truth benchmark dataset requires continuous manual curation.

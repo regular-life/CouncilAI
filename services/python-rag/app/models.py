@@ -56,6 +56,7 @@ class IngestResponse(BaseModel):
     doc_id: str
     chunk_count: int
     metadata: DocumentMetadata
+    preview_text: str = ""
     message: str = "Document ingested successfully"
 
 

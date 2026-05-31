@@ -89,6 +89,15 @@ func main() {
 	}
 	queryRouter := agent.NewRouter(routerClient)
 
+	// ── Ingest agent ────────────────────────────────────────────────
+	ingestClient, err := llm.NewClientFromProvider(
+		cfg.IngestionSlot.Provider, cfg.IngestionSlot.Model, keys, urls, 30*time.Second,
+	)
+	if err != nil {
+		log.Fatalf("Ingest agent: %v", err)
+	}
+	ingestAgent := agent.NewIngestAgent(ingestClient)
+
 	// ── Wire everything together ────────────────────────────────────
 	councilOrchestrator := council.NewOrchestrator(councilClients, chairmanClient, cfg.StageTimeout)
 
@@ -99,6 +108,7 @@ func main() {
 		semCache,
 		auditLogger,
 		queryRouter,
+		ingestAgent,
 		convStore,
 	)
 	authHandler := handlers.NewAuthHandler(jwtManager)

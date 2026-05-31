@@ -109,7 +109,14 @@ func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Choose deliberation strategy.
-	plan, err := h.Router.Plan(r.Context(), req.Question, hasDocument)
+	var docSummary string
+	if hasDocument {
+		if found, _ := h.Cache.Get(r.Context(), "doc_summary:"+req.DocID, &docSummary); !found {
+			log.Printf("[Query] Document summary not found in cache for %s", req.DocID)
+		}
+	}
+
+	plan, err := h.Router.Plan(r.Context(), req.Question, docSummary)
 	if err != nil {
 		log.Printf("[Query] Router failed: %v, defaulting to council", err)
 		plan = &agent.QueryPlan{Strategy: "council", NeedsDoc: hasDocument}

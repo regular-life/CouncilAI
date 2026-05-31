@@ -64,10 +64,24 @@ func (h *Handlers) HandleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var parsedResp struct {
-		DocID string `json:"doc_id"`
+		DocID       string `json:"doc_id"`
+		PreviewText string `json:"preview_text"`
 	}
 	if err := json.Unmarshal(body, &parsedResp); err == nil && parsedResp.DocID != "" {
 		docID = parsedResp.DocID
+	}
+
+	if parsedResp.PreviewText != "" && docID != "" {
+		summary, err := h.IngestAgent.SummarizeDocument(r.Context(), parsedResp.PreviewText)
+		if err == nil && summary != "" {
+			if err := h.Cache.Set(r.Context(), "doc_summary:"+docID, summary); err != nil {
+				log.Printf("[Ingest] Failed to cache summary for doc %s: %v", docID, err)
+			} else {
+				log.Printf("[Ingest] Generated and cached summary for doc %s", docID)
+			}
+		} else {
+			log.Printf("[Ingest] Summarization failed for doc %s: %v", docID, err)
+		}
 	}
 
 	h.Audit.LogIngest(userID, docID, time.Since(start), "success")
