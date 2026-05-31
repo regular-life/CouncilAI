@@ -17,7 +17,6 @@ class Reranker:
             
         if Reranker._instance is None:
             logger.info(f"Loading re-ranker model: {model_name}")
-            # TODO: Quantize model to ONNX format to improve CPU/GPU inference latency.
             Reranker._instance = CrossEncoder(model_name)
         self.model = Reranker._instance
 
@@ -35,7 +34,6 @@ class Reranker:
         if not documents:
             return []
 
-        # TODO: Support batch-wise prediction for very large document sets.
         pairs = [(query, doc) for doc in documents]
         scores = self.model.predict(pairs)
 

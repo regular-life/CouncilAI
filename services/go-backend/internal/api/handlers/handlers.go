@@ -28,8 +28,9 @@ type Handlers struct {
 	Audit         *audit.Logger
 	Router        *agent.Router
 	IngestAgent   *agent.IngestAgent
-	Memory        *memory.ConversationStore
-	HTTPClient    *http.Client
+	Memory                 *memory.ConversationStore
+	HTTPClient             *http.Client
+	SemanticCacheThreshold float32
 }
 
 // NewHandlers creates a Handlers instance with fully injected dependencies.
@@ -43,6 +44,7 @@ func NewHandlers(
 	router *agent.Router,
 	ingestAgent *agent.IngestAgent,
 	memoryStore *memory.ConversationStore,
+	semanticCacheThreshold float32,
 ) *Handlers {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -58,15 +60,16 @@ func NewHandlers(
 	}
 
 	return &Handlers{
-		RAGServiceURL: ragURL,
-		Council:       council,
-		Cache:         redisCache,
-		FastCache:     fastCache,
-		Audit:         auditLogger,
-		Router:        router,
-		IngestAgent:   ingestAgent,
-		Memory:        memoryStore,
-		HTTPClient:    &http.Client{Timeout: 120 * time.Second, Transport: transport},
+		RAGServiceURL:          ragURL,
+		Council:                council,
+		Cache:                  redisCache,
+		FastCache:              fastCache,
+		Audit:                  auditLogger,
+		Router:                 router,
+		IngestAgent:            ingestAgent,
+		Memory:                 memoryStore,
+		HTTPClient:             &http.Client{Timeout: 120 * time.Second, Transport: transport},
+		SemanticCacheThreshold: semanticCacheThreshold,
 	}
 }
 
@@ -118,7 +121,12 @@ func (h *Handlers) retrieveChunks(r *http.Request, req QueryRequest) ([]string, 
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	resp, err := h.HTTPClient.Post(h.RAGServiceURL+"/retrieve", "application/json", bytes.NewReader(jsonBody))
+	httpReq, err := http.NewRequestWithContext(r.Context(), "POST", h.RAGServiceURL+"/retrieve", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := h.HTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("retrieval request failed: %w", err)
 	}
@@ -146,14 +154,19 @@ func (h *Handlers) retrieveChunks(r *http.Request, req QueryRequest) ([]string, 
 }
 
 // getEmbedding generates a vector embedding for the input text from the RAG service.
-func (h *Handlers) getEmbedding(text string) ([]float32, error) {
+func (h *Handlers) getEmbedding(ctx context.Context, text string) ([]float32, error) {
 	reqBody := map[string]string{"text": text}
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	resp, err := h.HTTPClient.Post(h.RAGServiceURL+"/embed", "application/json", bytes.NewReader(jsonBody))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", h.RAGServiceURL+"/embed", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := h.HTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("embed request failed: %w", err)
 	}

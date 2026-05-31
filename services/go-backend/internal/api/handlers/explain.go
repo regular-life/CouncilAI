@@ -38,7 +38,6 @@ type ExplainResponse struct {
 }
 
 // HandleExplain generates customized summaries and explanations of documents.
-// TODO: Implement cache pre-warming logic for newly ingested documents.
 func (h *Handlers) HandleExplain(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	userID := middleware.GetUserID(r.Context())

@@ -38,7 +38,6 @@ type QueryResponse struct {
 }
 
 // HandleQuery processes a user's question, classifying the intent, extracting context, and deliberating.
-// TODO: Implement streaming chunk-by-chunk delivery to the client (Server-Sent Events).
 func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	userID := middleware.GetUserID(r.Context())
@@ -60,14 +59,13 @@ func (h *Handlers) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	queryHash := fmt.Sprintf("%x", sha256.Sum256([]byte(req.Question)))[:16]
 
 	// L1 Semantic Cache lookup.
-	// TODO: Make similarity threshold (0.85) dynamically configurable or auto-tuned.
 	var vector []float32
 	if hasDocument {
 		var err error
-		vector, err = h.getEmbedding(req.Question)
+		vector, err = h.getEmbedding(r.Context(), req.Question)
 		if err == nil && len(vector) == 384 {
 			var semCachedResponse QueryResponse
-			if h.FastCache.Get(req.DocID, vector, 0.85, &semCachedResponse) {
+			if h.FastCache.Get(req.DocID, vector, h.SemanticCacheThreshold, &semCachedResponse) {
 				semCachedResponse.CacheHit = true
 				semCachedResponse.Latency = time.Since(start).String()
 				h.Audit.LogQuery(userID, req.DocID, queryHash, time.Since(start), "semantic_cache_hit")

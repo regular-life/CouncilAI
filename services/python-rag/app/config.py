@@ -39,7 +39,6 @@ def get_settings() -> Settings:
     rag_conf = yaml_data.get("rag", {})
     server_conf = yaml_data.get("server", {})
 
-    # TODO: Implement dynamic validation and parsing of custom config files.
     chroma_db_path = os.getenv("CHROMA_DB_PATH", rag_conf.get("chroma_db_path", "/data/chroma_db"))
     embedding_model = os.getenv("EMBEDDING_MODEL", rag_conf.get("embedding_model", "BAAI/bge-small-en-v1.5"))
     reranker_model = os.getenv("RERANKER_MODEL", rag_conf.get("reranker_model", "cross-encoder/ms-marco-MiniLM-L-6-v2"))

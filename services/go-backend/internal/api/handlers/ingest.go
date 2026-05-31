@@ -13,7 +13,6 @@ import (
 )
 
 // HandleIngest passes uploaded documents to the Python RAG service.
-// TODO: Support multi-part file uploads of other formats (docx, txt).
 func (h *Handlers) HandleIngest(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	userID := middleware.GetUserID(r.Context())
@@ -92,7 +91,6 @@ func (h *Handlers) HandleIngest(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleHealth checks Go control plane health and dependency states.
-// TODO: Return detailed status report on pipeline component health.
 func (h *Handlers) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	status := map[string]interface{}{
 		"status":  "healthy",

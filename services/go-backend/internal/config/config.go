@@ -62,6 +62,7 @@ type Config struct {
 	StageTimeout   time.Duration
 	LLMTimeout     time.Duration
 	RequestTimeout time.Duration
+	SemanticCacheThreshold float64
 }
 
 // yamlSchema defines the structure of config.yaml.
@@ -75,6 +76,7 @@ type yamlSchema struct {
 			RPS   int `yaml:"rps"`
 			Burst int `yaml:"burst"`
 		} `yaml:"rate_limit"`
+		SemanticCacheThreshold float64 `yaml:"semantic_cache_threshold"`
 	} `yaml:"server"`
 
 	RAG struct {
@@ -144,7 +146,6 @@ func Load() *Config {
 	var y yamlSchema
 
 	// Read config.yaml if available.
-	// TODO: Support custom config paths via a CLI flag (e.g., -config=/path/to/config.yaml).
 	paths := []string{"/app/config.yaml", "config.yaml", "../config.yaml", "../../config.yaml"}
 	for _, p := range paths {
 		f, err := os.Open(p)
@@ -181,6 +182,10 @@ func Load() *Config {
 	burst := getEnvInt("RATE_LIMIT_BURST", y.Server.RateLimit.Burst)
 	if burst <= 0 {
 		burst = 20
+	}
+	cacheThresh := getEnvFloat64("SEMANTIC_CACHE_THRESHOLD", y.Server.SemanticCacheThreshold)
+	if cacheThresh <= 0 {
+		cacheThresh = 0.85
 	}
 
 	// 2. Peripheral Services.
@@ -353,6 +358,7 @@ func Load() *Config {
 		StageTimeout:   stageTimeout,
 		LLMTimeout:     llmTimeout,
 		RequestTimeout: reqTimeout,
+		SemanticCacheThreshold: cacheThresh,
 	}
 }
 

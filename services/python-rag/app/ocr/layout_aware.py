@@ -31,7 +31,6 @@ class LayoutAwareOCR(OCRBackend):
         blocks: list[OCRBlock] = []
         page_count = 0
 
-        # TODO: Parallelize page extraction loop for large PDF documents.
         try:
             with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
                 page_count = len(pdf.pages)
@@ -62,7 +61,6 @@ class LayoutAwareOCR(OCRBackend):
                             if obj.get("object_type") != "char":
                                 return True
                             x0, top, x1, bottom = obj["x0"], obj["top"], obj["x1"], obj["bottom"]
-                            # TODO: Use intersection over area ratio instead of simple coordinate bounds overlap check.
                             for tx0, ty0, tx1, ty1 in table_bboxes:
                                 if tx0 <= x0 <= tx1 and ty0 <= top <= ty1:
                                     return False

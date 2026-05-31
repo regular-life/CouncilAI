@@ -63,7 +63,6 @@ class DirectTextExtractor(OCRBackend):
         )
 
 
-# TODO: Implement page character-density threshold checks before direct routing.
 def route_ocr(file_bytes: bytes, filename: str, metadata: DocumentMetadata) -> OCRResult:
     """Choose the most appropriate extraction backend based on document metadata."""
     backend: OCRBackend

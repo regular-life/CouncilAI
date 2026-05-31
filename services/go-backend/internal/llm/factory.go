@@ -22,7 +22,6 @@ type ProviderURLs struct {
 }
 
 // NewClientFromProvider instantiates an LLMClient based on the specified provider and model.
-// TODO: Support dynamic custom timeout overrides per model in ProviderURLs.
 func NewClientFromProvider(provider, model string, keys ProviderKeys, urls ProviderURLs, timeout time.Duration) (LLMClient, error) {
 	switch provider {
 	case "gemini":

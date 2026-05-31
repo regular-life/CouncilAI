@@ -35,7 +35,6 @@ func NewAuthHandler(jwtManager *auth.JWTManager) *AuthHandler {
 }
 
 // HandleLogin authenticates users and issues JWT authorization tokens.
-// TODO: Track failed login attempts in cache to throttle brute-force attacks.
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -73,7 +72,6 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleRegister creates a new user and issues a JWT token.
-// TODO: Implement password complexity constraints and email verification routes.
 func (h *AuthHandler) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

@@ -41,7 +41,6 @@ type GenerateQuestionsResponse struct {
 }
 
 // HandleGenerateQuestions generates practice questions from document text.
-// TODO: Parse generated options and format them as structured JSON quizzes.
 func (h *Handlers) HandleGenerateQuestions(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	userID := middleware.GetUserID(r.Context())

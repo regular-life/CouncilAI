@@ -99,11 +99,9 @@ class TesseractOCR(OCRBackend):
         """Convert scanned PDF pages to images and process each page."""
         blocks: list[OCRBlock] = []
 
-        # TODO: Support localized language codes dynamically for pytesseract config.
         try:
             from pdf2image import convert_from_bytes
 
-            # TODO: Parallelize page rendering and processing to optimize latency.
             images = convert_from_bytes(file_bytes, dpi=300)
 
             for page_num, img in enumerate(images, start=1):

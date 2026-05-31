@@ -9,7 +9,6 @@ import (
 )
 
 // HandleClearConversation flushes multi-turn chat history for a session.
-// TODO: Support selective purging of individual turns or scaling limits by message ID.
 func (h *Handlers) HandleClearConversation(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r.Context())
 

@@ -42,7 +42,6 @@ class ChromaStore:
             for chunk in chunks
         ]
 
-        # TODO: Implement asynchronous vector insertions.
         db = Chroma.from_texts(
             texts=texts,
             embedding=self.embeddings,
@@ -147,7 +146,6 @@ class ChromaStore:
                 embedding_function=self.embeddings,
                 collection_name=collection_name,
             )
-            # TODO: Migrate from in-memory fetch to database cursor streams for very large docs.
             results = db.get()
             if results and results.get("documents"):
                 return "\n\n".join(results["documents"])

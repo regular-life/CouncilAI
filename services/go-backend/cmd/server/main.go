@@ -110,6 +110,7 @@ func main() {
 		queryRouter,
 		ingestAgent,
 		convStore,
+		float32(cfg.SemanticCacheThreshold),
 	)
 	authHandler := handlers.NewAuthHandler(jwtManager)
 	router := api.NewRouter(cfg, h, authHandler, jwtManager)

@@ -44,7 +44,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# TODO: Configure dynamic CORS whitelist mapping from config.yaml.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
