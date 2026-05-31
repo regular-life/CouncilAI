@@ -1,5 +1,7 @@
 #include "semantic_cache.h"
+#if defined(__AVX2__)
 #include <immintrin.h>
+#endif
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -48,23 +50,28 @@ public:
     }
 
     char* Get(const std::string& doc_id, const float* query_vector, float threshold) {
-        std::shared_lock<std::shared_mutex> lock(rw_lock_);
+        std::unique_lock<std::shared_mutex> lock(rw_lock_);
 
         auto it = doc_map_.find(doc_id);
         if (it == doc_map_.end() || it->second.empty()) return nullptr;
 
         float best_sim = -1.0f;
         std::string best_answer;
+        std::list<CacheEntry>::iterator best_entry_it;
+        bool found = false;
 
         for (auto entry_it : it->second) {
             float sim = CosineSimilaritySimd(query_vector, entry_it->vector_data.data());
             if (sim > best_sim) {
                 best_sim = sim;
                 best_answer = entry_it->answer;
+                best_entry_it = entry_it;
+                found = true;
             }
         }
 
-        if (best_sim >= threshold) {
+        if (found && best_sim >= threshold) {
+            lru_list_.splice(lru_list_.begin(), lru_list_, best_entry_it);
             return strdup(best_answer.c_str());
         }
 
@@ -73,6 +80,7 @@ public:
 
 private:
     float CosineSimilaritySimd(const float* a, const float* b) const {
+#if defined(__AVX2__)
         __m256 sum_ab = _mm256_setzero_ps();
         __m256 sum_a2 = _mm256_setzero_ps();
         __m256 sum_b2 = _mm256_setzero_ps();
@@ -97,6 +105,14 @@ private:
             norm_a += a2[i];
             norm_b += b2[i];
         }
+#else
+        float dot = 0, norm_a = 0, norm_b = 0;
+        for (int i = 0; i < kDim; ++i) {
+            dot += a[i] * b[i];
+            norm_a += a[i] * a[i];
+            norm_b += b[i] * b[i];
+        }
+#endif
 
         if (norm_a == 0.0f || norm_b == 0.0f) return 0.0f;
         return dot / (std::sqrt(norm_a) * std::sqrt(norm_b));

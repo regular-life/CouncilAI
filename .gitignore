@@ -2,9 +2,7 @@
 
 # Environment & secrets
 .env
-TODO.md
-docs/
-tests/benchmark_results.json
+tests/*.json
 data/
 
 # Python

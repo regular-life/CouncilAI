@@ -7,6 +7,7 @@ layout-aware chunking, embedding, and storage in ChromaDB.
 
 import hashlib
 import logging
+import re
 from fastapi import APIRouter, UploadFile, File, HTTPException
 
 from app.models import IngestResponse
@@ -41,8 +42,9 @@ async def ingest_document(
 
     # Generate doc_id if not provided
     if not doc_id:
+        safe_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', file.filename)
         file_hash = hashlib.md5(file_bytes[:4096]).hexdigest()[:12]
-        doc_id = f"{file.filename}_{file_hash}"
+        doc_id = f"{safe_filename}_{file_hash}"
 
     logger.info(f"Ingesting document: {file.filename} (doc_id={doc_id})")
 

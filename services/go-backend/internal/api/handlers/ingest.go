@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log"
 	"mime/multipart"
@@ -61,6 +62,14 @@ func (h *Handlers) HandleIngest(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "failed to read ingestion response", http.StatusInternalServerError)
 		return
 	}
+
+	var parsedResp struct {
+		DocID string `json:"doc_id"`
+	}
+	if err := json.Unmarshal(body, &parsedResp); err == nil && parsedResp.DocID != "" {
+		docID = parsedResp.DocID
+	}
+
 	h.Audit.LogIngest(userID, docID, time.Since(start), "success")
 
 	w.Header().Set("Content-Type", "application/json")
